@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.pyc
+*.log
+.env
+pdb_cache/
+vina.exe

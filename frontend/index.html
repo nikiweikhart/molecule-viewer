@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Molekül-Viewer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap"
+    rel="stylesheet"
+  />
+  <link rel="stylesheet" href="style.css" />
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div class="page">
+    <header class="topbar">
+      <span class="brand">Molekül-Viewer</span>
+      <span class="brand-tag">Struktur-Auflösung // 3D</span>
+    </header>
+
+    <form id="query-form" class="query-row">
+      <input
+        id="query-input"
+        type="text"
+        placeholder="Name, Formel oder SMILES — z. B. Aspirin, C6H12O6, CCO"
+        autocomplete="off"
+      />
+      <input
+        id="query-input-2"
+        type="text"
+        placeholder="Zweites Molekül zum Vergleich"
+        autocomplete="off"
+        hidden
+      />
+      <button type="button" id="compare-toggle" class="ghost-button">+ Vergleichen</button>
+      <button type="submit">Auflösen</button>
+    </form>
+
+    <div id="mode-row" class="mode-row">
+      <button type="button" class="mode-btn active" data-mode="ball-stick">Kugel-Stab</button>
+      <button type="button" class="mode-btn" data-mode="space-filling">Raumfüllend</button>
+      <button type="button" class="mode-btn" data-mode="charge">Ladung</button>
+    </div>
+
+    <div id="note" class="note" hidden></div>
+    <div id="error" class="error" hidden></div>
+
+    <div id="cards" class="cards"></div>
+
+    <div class="section-label">Reaktions-Animation</div>
+    <div class="reaction-row">
+      <select id="reaction-select"></select>
+      <button type="button" id="reaction-play">▶ Ablaufen lassen</button>
+    </div>
+    <div class="viewer-frame">
+      <div id="reaction-viewer" class="viewer"></div>
+    </div>
+
+    <div class="section-label">Chemischer Raum</div>
+    <div class="chemspace-controls">
+      <textarea
+        id="chemspace-input"
+        rows="4"
+        placeholder="Ein Molekül pro Zeile — Name, Formel oder SMILES"
+      ></textarea>
+      <div class="chemspace-buttons">
+        <button type="button" id="chemspace-example" class="ghost-button">Beispiel-Set laden</button>
+        <button type="button" id="chemspace-build">Karte erzeugen</button>
+      </div>
+    </div>
+    <div class="viewer-frame chemspace-frame">
+      <canvas id="chemspace-canvas"></canvas>
+    </div>
+    <div id="chemspace-info" class="chemspace-info" hidden></div>
+
+    <div class="section-label">Protein-Docking</div>
+    <div class="docking-controls">
+      <input
+        id="docking-pdb-input"
+        type="text"
+        placeholder="PDB-ID — z. B. 3PTB"
+        autocomplete="off"
+      />
+      <input
+        id="docking-ligand-input"
+        type="text"
+        placeholder="Ligand — Name, Formel oder SMILES"
+        autocomplete="off"
+      />
+      <button type="button" id="docking-example" class="ghost-button">Beispiel laden</button>
+      <button type="button" id="docking-dock">Docken</button>
+    </div>
+    <div class="viewer-frame">
+      <div id="docking-viewer" class="viewer"></div>
+    </div>
+    <div id="docking-info" class="chemspace-info" hidden></div>
+
+    <div class="section-label">Molekulardynamik</div>
+    <div class="docking-controls">
+      <input
+        id="dynamics-input"
+        type="text"
+        placeholder="Name, Formel oder SMILES — z. B. caffeine"
+        autocomplete="off"
+      />
+      <button type="button" id="dynamics-example" class="ghost-button">Beispiel laden</button>
+      <button type="button" id="dynamics-run">Simulieren</button>
+    </div>
+    <div class="viewer-frame">
+      <div id="dynamics-viewer" class="viewer"></div>
+    </div>
+    <div id="dynamics-info" class="chemspace-info" hidden></div>
+  </div>
+
+  <template id="card-template">
+    <div class="card">
+      <div class="viewer-frame">
+        <div class="viewer"></div>
+        <div class="result-names" hidden>
+          <div class="result-common-name"></div>
+          <div class="result-iupac-name"></div>
+        </div>
+      </div>
+      <div class="facts" hidden></div>
+      <div class="explain" hidden></div>
+    </div>
+  </template>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
