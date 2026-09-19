@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+rdkit
+requests
+anthropic
+python-dotenv
+numpy
+meeko
+scipy
+gemmi

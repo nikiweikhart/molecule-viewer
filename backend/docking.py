@@ -61,10 +61,17 @@ def _pdb_cache_path(pdb_id: str) -> Path:
     return PDB_CACHE_DIR / f"{pdb_id}.pdb"
 
 
+_PDB_ID_RE = re.compile(r"^[0-9][A-Z0-9]{3}$")
+
+
 def fetch_pdb(pdb_id: str) -> tuple[Path, str]:
     pdb_id = pdb_id.strip().upper()
     if not pdb_id:
         raise DockingError("PDB-ID ist leer.")
+    if not _PDB_ID_RE.match(pdb_id):
+        # Verhindert u.a. Path-Traversal über pdb_id (z.B. "../../foo") beim Aufbau
+        # von _pdb_cache_path() -- echte PDB-IDs sind immer 4 Zeichen, Ziffer + alnum.
+        raise DockingError(f"'{pdb_id}' ist keine gültige PDB-ID (4 Zeichen, z.B. 3PTB).")
 
     PDB_CACHE_DIR.mkdir(exist_ok=True)
     path = _pdb_cache_path(pdb_id)
