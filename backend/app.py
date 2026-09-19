@@ -9,6 +9,7 @@ from chem import ResolveError, resolve
 from chemspace import ChemicalSpaceError, build_chemical_space
 from docking import DockingError, dock
 from dynamics import run_md
+from equation import EquationError, build_equation_reaction
 from explain import explain
 from reactions import get_reaction, list_reactions
 
@@ -38,6 +39,10 @@ class DockRequest(BaseModel):
 
 class DynamicsRequest(BaseModel):
     query: str
+
+
+class EquationRequest(BaseModel):
+    equation: str
 
 
 @app.post("/api/resolve")
@@ -95,6 +100,14 @@ def api_dynamics(req: DynamicsRequest):
     try:
         return run_md(req.query)
     except ResolveError as e:
+        return JSONResponse(status_code=400, content={"error": str(e)})
+
+
+@app.post("/api/equation")
+def api_equation(req: EquationRequest):
+    try:
+        return build_equation_reaction(req.equation)
+    except EquationError as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
 
 

@@ -24,6 +24,12 @@ const reactionSelect = document.getElementById("reaction-select");
 const reactionPlayButton = document.getElementById("reaction-play");
 const reactionViewerContainer = document.getElementById("reaction-viewer");
 
+const equationInput = document.getElementById("equation-input");
+const equationExampleButton = document.getElementById("equation-example");
+const equationSolveButton = document.getElementById("equation-solve");
+const equationViewerContainer = document.getElementById("equation-viewer");
+const equationInfoEl = document.getElementById("equation-info");
+
 const chemspaceInput = document.getElementById("chemspace-input");
 const chemspaceExampleButton = document.getElementById("chemspace-example");
 const chemspaceBuildButton = document.getElementById("chemspace-build");
@@ -279,6 +285,59 @@ reactionPlayButton.addEventListener("click", async () => {
 });
 
 loadReactionList();
+
+const equationViewer = createViewer(equationViewerContainer);
+
+equationExampleButton.addEventListener("click", () => {
+  equationInput.value = "CH4 + O2 -> CO2 + H2O";
+});
+
+equationSolveButton.addEventListener("click", async () => {
+  const equation = equationInput.value.trim();
+  if (!equation) {
+    show(errorEl, "Bitte eine Reaktionsgleichung eingeben.");
+    return;
+  }
+
+  hide(errorEl);
+  equationInfoEl.hidden = false;
+  equationInfoEl.className = "chemspace-info";
+  equationInfoEl.textContent = "Wird gelöst …";
+  equationSolveButton.disabled = true;
+
+  try {
+    const response = await fetch("/api/equation", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ equation }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || "Unbekannter Fehler.");
+    }
+
+    equationViewer.playReaction(data);
+
+    equationInfoEl.innerHTML = "";
+    const name = document.createElement("span");
+    name.className = "chemspace-info-name";
+    name.textContent = data.label;
+    const detail = document.createElement("span");
+    detail.className = "chemspace-info-detail";
+    detail.textContent =
+      "Automatisch ausgeglichen und animiert — Atom-Zuordnung ist eine Näherung " +
+      "(nächstgelegene Zuordnung je Element), nicht chemisch exakt wie bei der " +
+      "handkuratierten Reaktion oben.";
+    equationInfoEl.appendChild(name);
+    equationInfoEl.appendChild(document.createElement("br"));
+    equationInfoEl.appendChild(detail);
+  } catch (err) {
+    equationInfoEl.hidden = true;
+    show(errorEl, err.message || "Unbekannter Fehler.");
+  } finally {
+    equationSolveButton.disabled = false;
+  }
+});
 
 const chemspacePlot = createChemSpacePlot(chemspaceCanvas);
 

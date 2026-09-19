@@ -23,6 +23,10 @@ Prozess: `uvicorn` dient das Frontend und die API zugleich.
   API-Key, siehe unten).
 - **Reaktions-Animation**: Moleküle morphen zwischen Edukt und Produkt,
   Bindungen brechen/entstehen sichtbar.
+- **Gleichungslöser**: eigene Reaktionsgleichung eintippen (z. B.
+  `CH4 + O2 -> CO2 + H2O`), Koeffizienten werden automatisch exakt
+  ausgeglichen und als Morph-Animation dargestellt (Atom-Zuordnung ist dabei
+  eine Näherung, siehe Einschränkungen unten).
 - **Chemischer Raum**: viele Moleküle auf einmal, nach struktureller
   Ähnlichkeit (Morgan-Fingerprints, eigene PCA + k-Means) auf einer 2D-Karte
   angeordnet und gruppiert.
@@ -61,6 +65,17 @@ cd backend
 
 Dann `http://localhost:8001` im Browser öffnen.
 
+## Tests
+
+```bash
+cd backend
+./.venv/Scripts/python.exe -m pip install -r requirements-dev.txt
+./.venv/Scripts/python.exe -m pytest
+```
+
+Die Tests rufen die echten externen Dienste (PubChem, RCSB, Vina) auf, kein
+Mocking — brauchen also eine Internetverbindung und dauern ein paar Sekunden.
+
 ## Bekannte Einschränkungen
 
 - Die Formel-Mehrdeutigkeits-Heuristik (z. B. bei `C6H12O6`) wählt die
@@ -71,6 +86,10 @@ Dann `http://localhost:8001` im Browser öffnen.
 - Die Molekulardynamik nutzt Force-Capping statt echter
   Bindungslängen-Constraints (SHAKE/RATTLE) und pendelt sich auf ein etwas
   höheres Energieniveau als das nominelle 300-K-Ziel ein.
+- Der Gleichungslöser gleicht die Stöchiometrie exakt aus, aber die
+  Atom-zu-Atom-Zuordnung fürs Morphen ist eine Näherung (nächstgelegene
+  Zuordnung je Element per Ungarischer Methode) — anders als bei der
+  handkuratierten Reaktions-Animation oben ist sie nicht chemisch bewiesen.
 
-Alle drei sind bewusst offen benannt — siehe `docs/stand.md` für den vollen
+Alle vier sind bewusst offen benannt — siehe `docs/stand.md` für den vollen
 Kontext.

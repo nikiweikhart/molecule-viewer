@@ -71,33 +71,61 @@ def _resolve_to_names(query: str) -> tuple[_NameInfo, str | None]:
     raise ResolveError(f"Konnte '{query}' nicht als Molekül erkennen.")
 
 
+# Einfacher In-Memory-Cache für PubChem-Anfragen -- läuft nur für die Lebensdauer des
+# Prozesses (kein Disk-Cache wie pdb_cache/), aber spart bei wiederholten Anfragen zum
+# selben Molekül (z.B. beim Gleichungslöser, der mehrere Stoffe pro Anfrage auflöst,
+# oder beim erneuten Testen derselben Beispiele) jedes Mal einen Netzwerk-Roundtrip.
+_name_cache: dict[str, "_NameInfo | None"] = {}
+_smiles_cache: dict[str, "_NameInfo | None"] = {}
+_formula_cache: dict[str, "tuple[_NameInfo | None, str | None]"] = {}
+
+
 def _pubchem_lookup_by_name(name: str) -> _NameInfo | None:
+    if name in _name_cache:
+        return _name_cache[name]
     url = f"{PUBCHEM_BASE}/compound/name/{name}/property/ConnectivitySMILES,Title,IUPACName/JSON"
     resp = requests.get(url, timeout=10)
     if resp.status_code != 200:
+        _name_cache[name] = None
         return None
     props = resp.json()["PropertyTable"]["Properties"][0]
-    return _NameInfo(
+    info = _NameInfo(
         smiles=props["ConnectivitySMILES"],
         common_name=props.get("Title", name),
         iupac_name=props.get("IUPACName"),
     )
+    _name_cache[name] = info
+    return info
 
 
 def _pubchem_lookup_by_smiles(smiles: str) -> _NameInfo | None:
+    if smiles in _smiles_cache:
+        return _smiles_cache[smiles]
     url = f"{PUBCHEM_BASE}/compound/smiles/property/ConnectivitySMILES,Title,IUPACName/JSON"
     resp = requests.post(url, data={"smiles": smiles}, timeout=10)
     if resp.status_code != 200:
+        _smiles_cache[smiles] = None
         return None
     props = resp.json()["PropertyTable"]["Properties"][0]
-    return _NameInfo(
+    info = _NameInfo(
         smiles=props.get("ConnectivitySMILES", smiles),
         common_name=props.get("Title", smiles),
         iupac_name=props.get("IUPACName"),
     )
+    _smiles_cache[smiles] = info
+    return info
 
 
 def _pubchem_lookup_by_formula(formula: str) -> tuple[_NameInfo | None, str | None]:
+    if formula in _formula_cache:
+        return _formula_cache[formula]
+
+    result = _pubchem_lookup_by_formula_uncached(formula)
+    _formula_cache[formula] = result
+    return result
+
+
+def _pubchem_lookup_by_formula_uncached(formula: str) -> tuple[_NameInfo | None, str | None]:
     url = f"{PUBCHEM_BASE}/compound/fastformula/{formula}/cids/JSON"
     resp = requests.get(url, timeout=10)
     if resp.status_code != 200:

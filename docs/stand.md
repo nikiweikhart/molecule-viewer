@@ -1,5 +1,99 @@
 # Stand: Molekül-Viewer
 
+## 2026-09-19 (später): Ausbaustufe — Gleichungslöser, plus PubChem-Cache und Backend-Tests
+
+Niki wollte eine 10. Ausbaustufe: eine frei eingetippte Reaktionsgleichung
+(z. B. `CH4 + O2 -> CO2 + H2O`) automatisch ausgleichen lassen und gleich
+als Morph-Animation zeigen, so wie die schon bestehende, handkuratierte
+Reaktions-Animation. Dazu noch "die anderen Sachen" aus der letzten
+Verbesserungsliste, soweit sinnvoll in einer Sitzung machbar.
+
+**Neue Datei `backend/equation.py`.** Wichtiger Unterschied zu
+`reactions.py`: dort ist die Atom-Zuordnung zwischen Edukt und Produkt von
+Hand über Atom-Map-Nummern hinterlegt (100% korrekt, aber nur für die paar
+vorbereiteten Beispiele). Bei einer frei eingetippten Gleichung gibt es
+diese Handarbeit nicht -- welches Atom zu welchem wird, ist ein eigenes,
+in der echten Cheminformatik ungelöstes Problem (reaction atom mapping,
+normalerweise per ML-Modell angenähert, z. B. RXNMapper). Deshalb zwei
+getrennte, unterschiedlich sichere Teile:
+
+1. **Stöchiometrie-Ausgleich: exakt, kein Kompromiss.** Für jeden Stoff
+   werden per RDKit die Elementzahlen gezählt, daraus eine Matrix gebaut
+   (Edukte positiv, Produkte negativ) und deren Nullraum per Gauß-Jordan
+   **über exakte Brüche** (`fractions.Fraction`, keine Gleitkomma-
+   Rundungsfehler) berechnet, dann auf die kleinsten positiven Ganzzahlen
+   skaliert. Klare Fehler statt stillem Rateversuch, wenn: kein Nullraum
+   existiert (Elemente passen nicht zusammen), der Nullraum mehr als 1-
+   dimensional ist (z. B. `C + O2 -> CO + CO2` -- durch Atomerhaltung
+   allein nicht eindeutig lösbar), oder gemischte Vorzeichen nötig wären
+   (Stoff steht auf der falschen Seite). Getestet: `CH4 + O2 -> CO2 + H2O`
+   → `CH4 + 2 O2 -> CO2 + 2 H2O`, `H2 + O2 -> H2O` → `2 H2 + O2 -> 2 H2O`,
+   `N2 + H2 -> NH3` → `N2 + 3 H2 -> 2 NH3` -- alle drei von Hand
+   nachgerechnet korrekt.
+2. **Atom-Zuordnung fürs Morphen: bewusst nur eine Näherung, offen
+   benannt.** `_match_atoms()` löst pro Element ein Zuordnungsproblem
+   (`scipy.optimize.linear_sum_assignment`, Ungarische Methode) nach
+   räumlichem Abstand zwischen den unabhängig eingebetteten Start- und
+   End-Layouts. Kein Versuch, echte Bindungsumlagerung nachzuvollziehen --
+   für einfache Lehrbuch-Gleichungen (Verbrennung, Synthese) sieht das
+   trotzdem chemisch sinnvoll aus (im Browser geprüft: `N2 + H2 -> NH3`
+   morpht sauber zu zwei getrennten NH3-Klumpen, keine Atome springen
+   chaotisch durcheinander), ist aber nicht chemisch bewiesen wie bei den
+   handgemappten Beispielen oben. Gleiche "ehrliche Vereinfachung"-Linie
+   wie bei der Formel-Heuristik, dem Docking und der MD -- im Frontend
+   auch so als Hinweistext angezeigt, nicht versteckt.
+
+**Datenformat bewusst identisch zu `reactions.build_reaction()`**
+(`start`/`end`/`correspondence`/`persistent_bonds`/`broken_bonds`/
+`formed_bonds`) -- dadurch war an `frontend/viewer.js` (`playReaction()`)
+**keine einzige Zeile** zu ändern, nur `app.js` bekam eine neue, zum
+bestehenden Muster passende Sektion (Eingabefeld, "Beispiel laden",
+"Lösen & animieren", eigener Viewer). Ein bewusster Unterschied zu
+`reactions.py`: dort werden Wasserstoffe nicht animiert (Skelett-Stil),
+hier **schon** -- sonst wären viele der interessantesten Alltagsgleichungen
+(Verbrennung, Ammoniak-Synthese, Neutralisation) fast leer, weil sie fast
+nur aus Wasserstoff bestehen.
+
+**Route:** `POST /api/equation {equation: str}` in `app.py`.
+
+**PubChem-Caching ergänzt** (`chem.py`, `_name_cache`/`_smiles_cache`/
+`_formula_cache`, einfache In-Memory-Dicts) -- war schon länger als
+Verbesserungsidee notiert (siehe unten) und wurde jetzt gebraucht, weil
+der Gleichungslöser pro Anfrage mehrere PubChem-Lookups auf einmal macht.
+Bewusst kein Disk-Cache wie bei `pdb_cache/`: eine rohe Nutzereingabe als
+Dateiname zu verwenden bräuchte erst eine Sanitisierung, ein In-Memory-
+Dict ist für die Prozesslaufzeit genauso wirksam und hat dieses Problem
+gar nicht erst.
+
+**Backend-Tests ergänzt** (`backend/tests/`, `pytest` + FastAPI
+`TestClient`, neue `backend/requirements-dev.txt`). Bewusst **keine**
+Mocks -- die Tests rufen echte PubChem-/RCSB-/Vina-Aufrufe auf, genau wie
+die App selbst, damit sie auch reale API-Änderungen auffangen (wie die
+schon einmal erlebte PubChem-Feldumbenennung, siehe Fallstrick 2 weiter
+unten). 11 Tests, alle grün: `/api/resolve` (Name, direktes SMILES,
+Formel, unbekannte Eingabe), `/api/equation` (Verbrennung ausgeglichen,
+fehlender Pfeil, unlösbare Gleichung), `/api/reactions`, `/api/dock`
+(3PTB+Benzamidin wie von Niki vorgeschlagen, plus zwei Fehlerfälle).
+Einzige Anpassung unterwegs: ein Test verließ sich darauf, dass PubChems
+Formel-Mehrdeutigkeit für `C6H12O6` immer eine Notiz auslöst -- das ist
+aber ein von PubChems aktuellem Datenbestand abhängiges Verhalten, kein
+stabiler Vertrag, deshalb abgeschwächt auf "Formel wird korrekt aufgelöst".
+
+**Nicht umgesetzt aus der letzten Ideen-Liste, bewusst zurückgestellt:**
+Ladungszustände beim Docking (pKa-Vorhersage ist ein eigenes, nicht
+triviales Teilproblem), SHAKE/RATTLE bei der MD (würde den Integrator
+deutlich umbauen), Export/Screenshot-Funktion, Deployment auf
+Render/Fly.io (braucht eigenen Account, Linux-Vina-Build). Alle vier
+bleiben unten in der Ideen-Liste stehen.
+
+**Getestet im Browser:** `CH4 + O2 -> CO2 + H2O` geladen und gelöst --
+Label zeigt korrekt "Methane + 2 Oxygen → Carbon Dioxide + 2 Water",
+Animation läuft sichtbar (CH4+2 O2 morphen zu CO2+2 H2O). Danach
+`N2 + H2 -> NH3` von Hand eingetippt -- Label "Nitrogen + 3 Hydrogen →
+2 Ammonia", Animation zeigt N2 + 3×H2 sauber zu 2× NH3 morphend. Keine
+Konsolenfehler in beiden Fällen. Regressionscheck: normale Auflösung
+("water") danach nochmal geprüft, lief einwandfrei.
+
 ## 2026-09-19: Fallstricke überprüft, ein echter Sicherheitsfund behoben, auf GitHub veröffentlicht
 
 Niki hat gebeten, die dokumentierten Fallstricke/Verbesserungsideen nochmal
@@ -628,9 +722,11 @@ Browser, im dunklen "Iron-Man-HUD"-Look.
 3. ~~Bei direkter SMILES-Eingabe wird als Anzeigename einfach der SMILES-Code
    selbst zurückgegeben~~ — behoben am Nachmittag des 2026-09-14, siehe oben
    (Rückwärtssuche bei PubChem per SMILES).
-4. PubChem-Anfragen haben kein Retry/Caching — bei wiederholten Anfragen zum
-   selben Molekül wird jedes Mal neu angefragt. Für den Kern okay, könnte bei
-   echter Nutzung ein einfacher In-Memory-Cache werden.
+4. ~~PubChem-Anfragen haben kein Retry/Caching — bei wiederholten Anfragen zum
+   selben Molekül wird jedes Mal neu angefragt.~~ — Caching ergänzt am
+   2026-09-19 (später), siehe Eintrag oben (`chem.py`, einfacher
+   In-Memory-Cache). Retry gibt es weiterhin nicht, war auch nicht das
+   eigentliche Problem.
 
 **Stand der 6 vereinbarten Ausbaustufen** (Details siehe Claude-Gedächtnis,
 `project_molecule_viewer.md`, oder frag einfach danach; Stand: Abend des
@@ -673,40 +769,46 @@ Dann **`http://localhost:8001`** im Browser öffnen (Port 8001, nicht 8000 —
 siehe Fallstrick oben). Eingabefeld testen mit z. B. `aspirin`, `C6H12O6`,
 `CCO`, die drei Darstellungs-Buttons durchklicken, "+ Vergleichen" mit einem
 zweiten Molekül ausprobieren, unten die Veresterung über "▶ Ablaufen
-lassen" abspielen, beim "Chemischer Raum"-Bereich "Beispiel-Set laden" +
-"Karte erzeugen" ausprobieren, bei "Protein-Docking" "Beispiel laden"
-(füllt `3PTB` + `benzamidine`) + "Docken" ausprobieren (dauert beim
-allerersten Mal am längsten, danach ist die Rezeptor-Vorbereitung für
-`3PTB` in `backend/pdb_cache/` gecacht und es geht schnell), und ganz
-unten bei "Molekulardynamik" "Beispiel laden" (füllt `caffeine`) +
-"Simulieren" — sollte nach ~1 Sekunde ein sichtbar wackelndes Molekül
-zeigen.
+lassen" abspielen, beim neuen "Gleichungslöser"-Bereich "Beispiel laden"
+(füllt `CH4 + O2 -> CO2 + H2O`) + "Lösen & animieren" ausprobieren (oder
+z. B. `N2 + H2 -> NH3` von Hand eintippen), beim "Chemischer Raum"-Bereich
+"Beispiel-Set laden" + "Karte erzeugen" ausprobieren, bei "Protein-Docking"
+"Beispiel laden" (füllt `3PTB` + `benzamidine`) + "Docken" ausprobieren
+(dauert beim allerersten Mal am längsten, danach ist die Rezeptor-
+Vorbereitung für `3PTB` in `backend/pdb_cache/` gecacht und es geht
+schnell), und ganz unten bei "Molekulardynamik" "Beispiel laden" (füllt
+`caffeine`) + "Simulieren" — sollte nach ~1 Sekunde ein sichtbar
+wackelndes Molekül zeigen.
 
 Falls die venv fehlt oder kaputt ist: `python -m venv .venv` im `backend`-
-Ordner, dann `./.venv/Scripts/python.exe -m pip install fastapi uvicorn rdkit
-requests anthropic python-dotenv numpy meeko scipy gemmi`. **Zusätzlich**
-liegt unter `backend/tools/vina.exe` die AutoDock-Vina-Binary — die ist
-keine Python-Abhängigkeit und muss beim venv-Neuaufsetzen nicht neu
-installiert werden, nur falls der ganze `backend`-Ordner fehlt: neu laden
-von `github.com/ccsb-scripps/AutoDock-Vina/releases` (Datei
+Ordner, dann `./.venv/Scripts/python.exe -m pip install -r requirements.txt`
+(für Backend-Tests zusätzlich `-r requirements-dev.txt`, siehe README).
+**Zusätzlich** liegt unter `backend/tools/vina.exe` die AutoDock-Vina-Binary
+— die ist keine Python-Abhängigkeit und muss beim venv-Neuaufsetzen nicht
+neu installiert werden, nur falls der ganze `backend`-Ordner fehlt: neu
+laden von `github.com/ccsb-scripps/AutoDock-Vina/releases` (Datei
 `vina_1.2.7_win.exe`, umbenennen zu `vina.exe`). Für die Molekulardynamik
-ist nichts Zusätzliches nötig — `dynamics.py` nutzt nur RDKit + numpy.
+und den Gleichungslöser ist nichts Zusätzliches nötig — beide nutzen nur
+schon vorhandene Pakete (RDKit, numpy, scipy).
 
 **Alle 6 ursprünglich vereinbarten Ausbaustufen sind erledigt, plus alle
 3 der "richtig aufwendigen" API-freien Folge-Ausbaustufen (chemischer
-Raum, Protein-Docking, Molekulardynamik).** Damit ist die ursprünglich
-besprochene Roadmap komplett durch. Einzige offene Lücke aus dem Kern:
-KI-Erklärtext (Ausbaustufe 5) wartet weiter auf einen `ANTHROPIC_API_KEY`
-von Niki — `backend/.env.example` nach `backend/.env` kopieren, echten
-Key eintragen, Server neu starten. Alles andere läuft schon ohne das.
+Raum, Protein-Docking, Molekulardynamik), plus eine 10., von Niki am
+2026-09-19 gewünschte Ausbaustufe (Gleichungslöser).** Einzige offene
+Lücke aus dem Kern: KI-Erklärtext (Ausbaustufe 5) wartet weiter auf einen
+`ANTHROPIC_API_KEY` von Niki — `backend/.env.example` nach `backend/.env`
+kopieren, echten Key eintragen, Server neu starten. Alles andere läuft
+schon ohne das.
 
 **Nächste Schritte sind komplett offen** — es gibt keine vereinbarte
 Ausbaustufe mehr, die noch aussteht. Ideen für kleinere Lücken/Politur,
 falls gefragt: weitere Reaktionen zu `backend/reactions.py` ergänzen
 (Rezept siehe oben), die Formel-Mehrdeutigkeits-Heuristik verbessern
 (Fallstrick 1 unten), beim Protein-Docking die Ladungszustände des
-Liganden vor dem Docken berücksichtigen (siehe Einschränkung oben), oder
-bei der Molekulardynamik echte Bindungslängen-Constraints (SHAKE/RATTLE)
-einbauen, um näher am nominellen Temperatur-Ziel zu bleiben (siehe
-Einschränkung oben) — aber erst wieder anfangen, wenn Niki eine neue
-Richtung vorgibt.
+Liganden vor dem Docken berücksichtigen (siehe Einschränkung oben), bei
+der Molekulardynamik echte Bindungslängen-Constraints (SHAKE/RATTLE)
+einbauen (siehe Einschränkung oben), die Atom-Zuordnung im Gleichungslöser
+verbessern (z. B. per lokaler Bindungsumgebung statt reinem Abstand vor-
+matchen, siehe Eintrag vom 2026-09-19), oder ein Export/Screenshot-Feature
+und ein echtes Deployment (Render/Fly.io, braucht Linux-Vina-Build) —
+aber erst wieder anfangen, wenn Niki eine neue Richtung vorgibt.

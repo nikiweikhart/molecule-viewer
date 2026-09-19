@@ -65,6 +65,22 @@
       <div id="reaction-viewer" class="viewer"></div>
     </div>
 
+    <div class="section-label">Gleichungslöser</div>
+    <div class="docking-controls">
+      <input
+        id="equation-input"
+        type="text"
+        placeholder="Reaktionsgleichung — z. B. CH4 + O2 -> CO2 + H2O"
+        autocomplete="off"
+      />
+      <button type="button" id="equation-example" class="ghost-button">Beispiel laden</button>
+      <button type="button" id="equation-solve">Lösen &amp; animieren</button>
+    </div>
+    <div class="viewer-frame">
+      <div id="equation-viewer" class="viewer"></div>
+    </div>
+    <div id="equation-info" class="chemspace-info" hidden></div>
+
     <div class="section-label">Chemischer Raum</div>
     <div class="chemspace-controls">
       <textarea
