@@ -137,3 +137,50 @@ def test_pdb_ligand_invalid_pdb_id_returns_400():
     resp = client.post("/api/pdb-ligand", json={"pdb_id": "not-an-id"})
     assert resp.status_code == 400
     assert "error" in resp.json()
+
+
+def test_peptide_oxytocin_by_curated_name():
+    # Prüft auch die Disulfidbrücken-Heuristik (peptide._add_disulfide_if_two_cysteines):
+    # Oxytocins 2 Cystein-Reste sollten über ein S-S-Bindungspaar verbunden sein.
+    resp = client.post("/api/peptide", json={"name": "oxytocin"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "oxytocin" in data["common_name"].lower()
+    assert data["facts"]["formula"].count("S") >= 1
+    sulfur_indices = [i for i, a in enumerate(data["atoms"]) if a["element"] == "S"]
+    assert len(sulfur_indices) == 2
+    assert any(
+        {b["a"], b["b"]} == set(sulfur_indices) for b in data["bonds"]
+    )  # echte S-S-Bindung zwischen den beiden Schwefelatomen
+
+
+def test_peptide_custom_sequence():
+    resp = client.post("/api/peptide", json={"sequence": "YGGFM"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["atoms"]) > 0
+    assert data["facts"]["formula"].startswith("C")
+
+
+def test_peptide_too_long_returns_400():
+    resp = client.post("/api/peptide", json={"sequence": "A" * 20})
+    assert resp.status_code == 400
+    assert "error" in resp.json()
+
+
+def test_peptide_invalid_letters_returns_400():
+    resp = client.post("/api/peptide", json={"sequence": "GXYZ1"})
+    assert resp.status_code == 400
+    assert "error" in resp.json()
+
+
+def test_peptide_unknown_name_returns_400():
+    resp = client.post("/api/peptide", json={"name": "definitiv-kein-peptid"})
+    assert resp.status_code == 400
+    assert "error" in resp.json()
+
+
+def test_peptide_neither_name_nor_sequence_returns_400():
+    resp = client.post("/api/peptide", json={})
+    assert resp.status_code == 400
+    assert "error" in resp.json()

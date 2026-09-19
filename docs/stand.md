@@ -1,5 +1,105 @@
 # Stand: Molekül-Viewer
 
+## 2026-09-19 (noch später): Ausbaustufe — kleine Peptide per Sequenzeingabe
+
+Niki wollte die "mittlere Stufe" aus einer vorherigen Besprechung: kleine
+Peptide (bis ~15 Aminosäuren) lokal mit RDKit als angenäherte 3D-Struktur
+anzeigen -- explizit **nicht** die Semaglutid/Ozempic-Größenordnung (die läuft
+weiter über echte Kristallstrukturen, siehe `docking.pdb_ligand()`) und
+**nicht** echtes Protein-Folding (Boltz-2 o.ä., eigenes späteres Vorhaben).
+Kernproblem: Namen wie "Oxytocin"/"Vasopressin" scheitern an PubChems
+unzuverlässiger Peptid-Namenssuche, und selbst wenn die Auflösung klappt, ist
+ein einzelner `EmbedMolecule`-Versuch für Moleküle mit vielen drehbaren
+Bindungen zu zufällig.
+
+**Neue Datei `backend/peptide.py`** (eigene Datei statt Erweiterung von
+`chem.py` -- andere Eingabeform, kein PubChem-Netzwerkaufruf nötig, passt als
+eigenständiges Modul besser zum bestehenden Muster wie `docking.py`/
+`chemspace.py`):
+
+1. **Sequenz statt Name als primärer Eingabeweg.** `Chem.MolFromSequence()`
+   baut aus einem Ein-Buchstaben-Aminosäurecode (z.B. `CYIQNCPLG` für
+   Oxytocin) direkt ein RDKit-Mol -- kein PubChem nötig, keine Namensauflösung,
+   die für Peptide ohnehin unzuverlässig ist.
+2. **Längenlimit 15 Reste, hart durchgesetzt** (`MAX_RESIDUES`), gleiche Linie
+   wie beim Docking ohne brauchbaren Liganden (1UBQ-Fall) -- klare
+   Fehlermeldung statt eines langsamen/sinnlosen Embedding-Versuchs.
+3. **Bessere Einbettung: `EmbedMultipleConfs` (12 Konformere) + MMFF-Optimierung
+   jedes einzelnen + das energieärmste behalten** (`_embed_lowest_energy`),
+   statt nur einem einzelnen `EmbedMolecule`-Versuch. `useRandomCoords=True`
+   gesetzt -- hilft besonders bei den durch die Disulfidbrücke (siehe Punkt 5)
+   zyklischen Strukturen. Immer noch keine biologisch validierte Faltung, aber
+   deutlich weniger Zufallsergebnis.
+4. **Ehrlich gekennzeichnet, gleiche Linie wie bei Formel-Heuristik/Docking-
+   Ladungszuständen/MD-Force-Capping:** die zurückgegebene `note` sagt klar,
+   dass es eine berechnete Niedrigenergie-Konformation ist (keine gemessene
+   oder biologisch bestätigte Struktur), UND dass die Termini als freies Amin/
+   freie Carbonsäure aufgebaut sind -- posttranslationale Modifikationen wie
+   die C-terminale Amidierung bei echtem Oxytocin/Vasopressin fehlen (per
+   Testlauf entdeckt: ohne Amidierung hat unser Oxytocin ein N/O zu wenig/viel
+   gegenüber der echten Summenformel -- kein Fehler, sondern eine bewusste,
+   jetzt offen benannte Vereinfachung).
+5. **Spontane Ergänzung, nicht in Nikis ursprünglicher Liste, aber ohne sie
+   wäre die namensgebende Ringstruktur von Oxytocin/Vasopressin komplett
+   verloren gegangen:** `_add_disulfide_if_two_cysteines()` -- enthält die
+   Sequenz genau 2 Cystein-Reste, wird eine Disulfidbrücke zwischen ihren
+   Thiolschwefeln geknüpft (Atome über `GetPDBResidueInfo()` gefunden, Bindung
+   per `RWMol.AddBond` + `SetNoImplicit`/`SetNumExplicitHs(0)` auf den beiden
+   Schwefeln, dann neu sanitisiert). Ohne das wären es nur zwei lose SH-Enden
+   statt eines Rings -- optisch und chemisch der auffälligste Unterschied.
+   Reine Heuristik (genau 2 Cystein → verbinden), keine chemische Bestätigung,
+   dass diese beiden Reste in der echten Struktur wirklich verbrückt sind, aber
+   für die beiden kuratierten Beispiele stimmt es. Im Browser bestätigt: die
+   3D-Struktur ist sichtbar kompakt/geknäult statt einer langen offenen Kette.
+6. **Kuratierte Namens-Liste** (`_KNOWN_PEPTIDES`): Oxytocin, Vasopressin,
+   Met-Enkephalin, Leu-Enkephalin → feste Sequenz. `sequence`-Feld hat Vorrang
+   vor `name`, falls beide angegeben würden (kommt in der Praxis nicht vor,
+   das Frontend nutzt pro Aufruf nur eins von beiden).
+7. **Route `POST /api/peptide {name?, sequence?}`** (`app.py`), exakt gleiches
+   Antwortformat wie `/api/resolve` (`atoms`/`bonds`/`facts`/`common_name`/
+   `iupac_name`/`note`) -- am Frontend musste dafür nichts Neues gebaut werden,
+   nur `applyResolvedData()` wiederverwendet.
+
+**Frontend (`frontend/app.js`):** neue Bibliothek-Kategorie "Kleine Peptide
+(angenäherte Faltung)" nach dem Muster der bestehenden "Peptid-Wirkstoffe"-
+Kategorie (`className: "library-category-peptide"`, gleicher gestrichelter
+Rand über die schon vorhandene CSS-Regel, erklärender Hinweistext), mit 4
+Karten (Oxytocin/Vasopressin/Met-Enkephalin/Leu-Enkephalin) die
+`loadPeptideIntoSlot(0, peptideName, null)` aufrufen. Zusätzlich ein eigenes
+Eingabefeld+Button ("Peptid laden") direkt unter den Karten
+(`createPeptideSequenceRow()`, `category.customSequenceInput`-Flag in
+`renderLibrary()`), für alle, die eine eigene Sequenz eintippen wollen --
+ruft `loadPeptideIntoSlot(0, null, sequence)`. CSS: nur eine Zeile
+(`.peptide-sequence-row { margin-top: 10px; }`) ergänzt, sonst komplett
+`.docking-controls`-Klasse wiederverwendet (Input+Button-Styling schon
+vorhanden).
+
+**Backend-Tests ergänzt** (`backend/tests/test_api.py`, 6 neue): Oxytocin per
+kuratiertem Namen (prüft auch explizit die Disulfidbrücken-Heuristik -- genau
+2 Schwefelatome, echte S-S-Bindung zwischen ihnen in den zurückgegebenen
+`bonds`), eigene Sequenz (`YGGFM`), zu lange Sequenz → 400, ungültige
+Aminosäure-Buchstaben → 400, unbekannter kuratierter Name → 400, weder Name
+noch Sequenz → 400. Alle 22 Backend-Tests grün (16 alte + 6 neue).
+
+**Getestet im Browser:** Oxytocin- und Vasopressin-Karte laden sichtbar
+kompakte, geknäulte Strukturen (nicht offene Ketten) mit korrektem
+Namens-Label ("OXYTOCIN (PEPTID, 9 RESTE)") und Fakten-Panel (Oxytocin:
+`C43H65N11O13S2`, 1008.19 g/mol); Hinweistext erscheint korrekt mit allen drei
+Ehrlichkeits-Punkten (Näherung/Termini/Disulfidbrücke). Eigene Sequenz manuell
+eingetippt (`GRGDSP`, RGD-Zelladhäsionsmotiv) -- lädt korrekt, Fakten-Panel
+stimmt. Zu lange Sequenz (Insulin-A-Kette, 21 Reste) über dasselbe Feld
+eingetippt -- klare rote Fehlermeldung mit der 15-Reste-Grenze, kein Absturz.
+Danach Regressionscheck: normale Auflösung ("water") über das Haupt-Eingabefeld
+nochmal geprüft, lief einwandfrei (Hinweistext wurde korrekt geleert). Keine
+unerwarteten Konsolenfehler (nur der erwartete, vom Frontend sauber behandelte
+400 beim Zu-lang-Test).
+
+**Nebenbei aufgetreten -- der bekannte Server-Fallstrick war wieder da:** Ein
+alter Uvicorn-Prozess von einer früheren Sitzung hing noch auf Port 8001
+(`netstat -ano | grep ":8001"` zeigte ihn als `ABHÖREN`, wegen deutscher
+Locale nicht als "LISTENING" -- Grep-Filter darauf muss das berücksichtigen).
+`taskkill /F /PID <pid> /T` auf die gefundene PID hat wie gewohnt gereicht.
+
 ## 2026-09-19 (Fortsetzung): Insulin an seinem Rezeptor (4OGA) ergänzt
 
 Direkte Folge auf den Eintrag unten, in derselben Sitzung: Niki wollte Insulin
@@ -931,10 +1031,14 @@ Durchlauf) oben.
 
 Dann **`http://localhost:8001`** im Browser öffnen (Port 8001, nicht 8000 —
 siehe Fallstrick oben). Ganz oben die neue **Bibliothek** ausprobieren — auf
-ein paar Karten klicken (z. B. "Aspirin", "Vitamin C"), und unter "Peptid-
+ein paar Karten klicken (z. B. "Aspirin", "Vitamin C"), unter "Peptid-
 Wirkstoffe" auf "Ozempic / Semaglutid" (PDB `4ZGM`) und "Insulin (an seinem
 Rezeptor)" (PDB `4OGA`, zwei Ketten A+B) — beide über `/api/pdb-ligand`,
-kein Docking, dauert beim ersten Mal einen Moment. Danach Eingabefeld
+kein Docking, dauert beim ersten Mal einen Moment — und unter "Kleine Peptide
+(angenäherte Faltung)" auf "Oxytocin" oder "Vasopressin" (über `/api/peptide`,
+zeigt die per Disulfidbrücken-Heuristik geknäulte Struktur), plus im
+Eingabefeld darunter eine eigene Sequenz eintippen (z. B. `GRGDSP`) oder eine
+zu lange (>15 Reste) zum Prüfen der Fehlermeldung. Danach Eingabefeld
 testen mit z. B. `aspirin`, `C6H12O6`,
 `CCO`, die drei Darstellungs-Buttons durchklicken, "+ Vergleichen" mit einem
 zweiten Molekül ausprobieren, unten die Veresterung über "▶ Ablaufen
@@ -962,12 +1066,14 @@ schon vorhandene Pakete (RDKit, numpy, scipy).
 
 **Alle 6 ursprünglich vereinbarten Ausbaustufen sind erledigt, plus alle
 3 der "richtig aufwendigen" API-freien Folge-Ausbaustufen (chemischer
-Raum, Protein-Docking, Molekulardynamik), plus eine 10. (Gleichungslöser)
-und eine 11., zweiteilige Ausbaustufe vom 2026-09-19 (autonomer Durchlauf):
+Raum, Protein-Docking, Molekulardynamik), plus eine 10. (Gleichungslöser),
+eine 11., zweiteilige Ausbaustufe vom 2026-09-19 (autonomer Durchlauf):
 PDB-Liganden direkt anzeigen (`/api/pdb-ligand`) + Bibliothek-Bereich im
 Frontend, samt Folge-Ergänzung um Insulin an seinem Rezeptor (4OGA, per
-neuem `chain_ids`-Parameter).** Einzige offene Lücke aus dem Kern:
-KI-Erklärtext (Ausbaustufe 5)
+neuem `chain_ids`-Parameter), und eine 12.: kleine Peptide per
+Sequenzeingabe (`/api/peptide`, bis 15 Reste, mit Disulfidbrücken-Heuristik
+und energieärmster von mehreren Konformeren, siehe Eintrag ganz oben).**
+Einzige offene Lücke aus dem Kern: KI-Erklärtext (Ausbaustufe 5)
 wartet weiter auf einen `ANTHROPIC_API_KEY` von Niki — `backend/.env.example`
 nach `backend/.env` kopieren, echten Key eintragen, Server neu starten.
 Alles andere läuft schon ohne das.
@@ -983,7 +1089,8 @@ einbauen (siehe Einschränkung oben), die Atom-Zuordnung im Gleichungslöser
 verbessern (z. B. per lokaler Bindungsumgebung statt reinem Abstand vor-
 matchen, siehe Eintrag vom 2026-09-19), weitere Peptid-Wirkstoffe/Klein-
 Molekül-Karten zur Bibliothek ergänzen (z. B. per `hetero_code` oder
-`chain_ids`, siehe die beiden 2026-09-19-Einträge oben), oder ein
+`chain_ids`, siehe die beiden 2026-09-19-Einträge oben), die kuratierte
+Peptid-Namensliste in `peptide.py` erweitern, oder ein
 Export/Screenshot-Feature
 und ein echtes Deployment (Render/Fly.io, braucht Linux-Vina-Build) —
 aber erst wieder anfangen, wenn Niki eine neue Richtung vorgibt.

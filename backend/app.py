@@ -11,6 +11,7 @@ from docking import DockingError, dock, pdb_ligand
 from dynamics import run_md
 from equation import EquationError, build_equation_reaction
 from explain import explain
+from peptide import PeptideError, build_peptide
 from reactions import get_reaction, list_reactions
 
 app = FastAPI()
@@ -49,6 +50,11 @@ class DynamicsRequest(BaseModel):
 
 class EquationRequest(BaseModel):
     equation: str
+
+
+class PeptideRequest(BaseModel):
+    name: str | None = None
+    sequence: str | None = None
 
 
 @app.post("/api/resolve")
@@ -122,6 +128,14 @@ def api_equation(req: EquationRequest):
     try:
         return build_equation_reaction(req.equation)
     except EquationError as e:
+        return JSONResponse(status_code=400, content={"error": str(e)})
+
+
+@app.post("/api/peptide")
+def api_peptide(req: PeptideRequest):
+    try:
+        return build_peptide(req.name, req.sequence)
+    except PeptideError as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
 
 

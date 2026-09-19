@@ -121,6 +121,18 @@ const LIBRARY_CATEGORIES = [
       { label: "Insulin (an seinem Rezeptor)", pdbId: "4OGA", chainIds: ["A", "B"] },
     ],
   },
+  {
+    title: "Kleine Peptide (angenäherte Faltung)",
+    hint: "Baut die Struktur lokal aus dem Ein-Buchstaben-Aminosäurecode auf (RDKit-Embedding, energieärmste von mehreren Konformeren) — eine berechnete Näherung, keine gemessene oder biologisch bestätigte Faltung. Bis ca. 15 Aminosäuren, siehe Eingabefeld unten für eigene Sequenzen.",
+    className: "library-category-peptide",
+    items: [
+      { label: "Oxytocin", peptideName: "oxytocin" },
+      { label: "Vasopressin", peptideName: "vasopressin" },
+      { label: "Met-Enkephalin", peptideName: "met-enkephalin" },
+      { label: "Leu-Enkephalin", peptideName: "leu-enkephalin" },
+    ],
+    customSequenceInput: true,
+  },
 ];
 
 const dockingPdbInput = document.getElementById("docking-pdb-input");
@@ -299,6 +311,26 @@ async function loadPdbLigandIntoSlot(index, pdbId, heteroCode, chainIds) {
   return data;
 }
 
+async function resolvePeptide(name, sequence) {
+  const response = await fetch("/api/peptide", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: name || null, sequence: sequence || null }),
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.error || "Unbekannter Fehler.");
+  }
+  return data;
+}
+
+async function loadPeptideIntoSlot(index, name, sequence) {
+  const slot = ensureSlot(index);
+  const data = await resolvePeptide(name, sequence);
+  applyResolvedData(slot, data);
+  return data;
+}
+
 function createLibraryCard(item) {
   const card = document.createElement("button");
   card.type = "button";
@@ -314,6 +346,8 @@ function createLibraryCard(item) {
     try {
       const data = item.pdbId
         ? await loadPdbLigandIntoSlot(0, item.pdbId, item.heteroCode, item.chainIds)
+        : item.peptideName
+        ? await loadPeptideIntoSlot(0, item.peptideName, null)
         : await loadIntoSlot(0, item.query);
       if (data.note) show(noteEl, data.note);
       cardsEl.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -325,6 +359,42 @@ function createLibraryCard(item) {
   });
 
   return card;
+}
+
+function createPeptideSequenceRow() {
+  const row = document.createElement("div");
+  row.className = "docking-controls peptide-sequence-row";
+
+  const input = document.createElement("input");
+  input.type = "text";
+  input.placeholder = "Eigene Sequenz — Ein-Buchstaben-Code, z. B. CYIQNCPLG";
+  input.autocomplete = "off";
+
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = "Peptid laden";
+
+  button.addEventListener("click", async () => {
+    const sequence = input.value.trim();
+    if (!sequence || button.classList.contains("loading")) return;
+    button.classList.add("loading");
+    hide(errorEl);
+    hide(noteEl);
+
+    try {
+      const data = await loadPeptideIntoSlot(0, null, sequence);
+      if (data.note) show(noteEl, data.note);
+      cardsEl.scrollIntoView({ behavior: "smooth", block: "start" });
+    } catch (err) {
+      show(errorEl, err.message || "Unbekannter Fehler.");
+    } finally {
+      button.classList.remove("loading");
+    }
+  });
+
+  row.appendChild(input);
+  row.appendChild(button);
+  return row;
 }
 
 function renderLibrary() {
@@ -351,6 +421,10 @@ function renderLibrary() {
       grid.appendChild(createLibraryCard(item));
     }
     section.appendChild(grid);
+
+    if (category.customSequenceInput) {
+      section.appendChild(createPeptideSequenceRow());
+    }
 
     libraryEl.appendChild(section);
   }

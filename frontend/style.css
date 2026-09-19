@@ -214,6 +214,10 @@ button:hover {
   border-style: dashed;
 }
 
+.peptide-sequence-row {
+  margin-top: 10px;
+}
+
 .reaction-row {
   display: flex;
   flex-wrap: wrap;
