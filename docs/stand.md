@@ -1,5 +1,62 @@
 # Stand: Molekül-Viewer
 
+## 2026-09-19: Fallstricke überprüft, ein echter Sicherheitsfund behoben, auf GitHub veröffentlicht
+
+Niki hat gebeten, die dokumentierten Fallstricke/Verbesserungsideen nochmal
+zu prüfen, selbst weiterzudenken, und das Projekt auf GitHub anzulegen.
+
+**Fallstricke erneut geprüft — beide weiterhin gültig, keine akute
+Blockade:** Aktuell hängt kein alter Uvicorn-Prozess auf Port 8001
+(`netstat` leer). Der `--reload`-Fallstrick ist nicht reproduzierbar
+prüfbar (trat unregelmäßig auf), bleibt aber als Hinweis stehen. Der
+`ANTHROPIC_API_KEY`-Gap ist weiterhin offen (`backend/.env` existiert
+noch nicht) — Ausbaustufe 5 wartet weiter auf Nikis eigenen Key.
+
+**Beim Selbst-Nachdenken einen echten, bisher nicht dokumentierten Fund
+gemacht: Path-Traversal über `pdb_id`.** `docking.fetch_pdb()` hat die
+Nutzereingabe nur `.strip().upper()`t und dann ungeprüft in einen
+Dateipfad eingesetzt (`PDB_CACHE_DIR / f"{pdb_id}.pdb"`). Eine PDB-ID wie
+`../../irgendwas` hätte das Ergebnis der RCSB-Anfrage an eine beliebige
+Stelle außerhalb von `pdb_cache/` schreiben können — bei einem Projekt,
+das gerade öffentlich wird, ein echtes Risiko, nicht nur ein
+Lehrbuch-Fall. **Behoben:** `_PDB_ID_RE = re.compile(r"^[0-9][A-Z0-9]{3}$")`
+validiert jetzt gegen das echte PDB-ID-Format (4 Zeichen, erste Ziffer),
+bevor irgendein Pfad gebaut wird — echte IDs wie `3PTB`/`1UBQ` bleiben
+gültig, `../..`-artige Eingaben werden klar abgelehnt (per Testskript
+gegengeprüft).
+
+**Zwei weitere kleine Lücken schließen, bevor der Code öffentlich wird:**
+- `backend/requirements.txt` ergänzt (`fastapi`, `uvicorn`, `rdkit`,
+  `requests`, `anthropic`, `python-dotenv`, `numpy`, `meeko`, `scipy`,
+  `gemmi`) — vorher stand die Paketliste nur als Freitext hier in
+  `stand.md`, nicht als installierbare Datei.
+- `README.md` im Projekt-Wurzelverzeichnis ergänzt — kurzer
+  öffentlicher Überblick (Funktionen, Setup, bekannte Einschränkungen)
+  für GitHub-Besucher, getrennt von `CLAUDE.md`/`docs/stand.md`, die
+  für Claude-Sessions gedacht sind.
+
+**Weitere Verbesserungsideen geprüft, aber (noch) nicht umgesetzt —
+bewusst nur dokumentiert, um den Commit fokussiert zu halten:**
+- PubChem-Caching (bestätigt: `chem.py` hat aktuell kein Retry/Cache,
+  jede Anfrage geht neu raus) — sinnvoller nächster Schritt für
+  gefühlte Geschwindigkeit.
+- Ladungszustände des Liganden vor dem Docken (siehe bestehende
+  Einschränkung weiter unten) — nicht trivial (pKa-Vorhersage), bleibt
+  offen.
+- SHAKE/RATTLE-Constraints bei der MD (siehe bestehende Einschränkung
+  weiter unten) — würde den Integrator deutlich komplexer machen.
+- Export/Screenshot-Funktion, Backend-Tests (`pytest` gegen
+  `/api/resolve`, `/api/dock`), Deployment-Option — alles sinnvoll,
+  aber jeweils eigene kleine Ausbaustufen, kein Ein-Zeiler.
+
+**GitHub-Repo angelegt und gepusht:**
+[github.com/nikiweikhart/molecule-viewer](https://github.com/nikiweikhart/molecule-viewer)
+(öffentlich, auf Nikis Wunsch — Portfolio-tauglich für die VWA). `gh`
+CLI war nicht installiert, deshalb Repo-Erstellung über den Chrome-
+Browser (Nikis eingeloggte GitHub-Session) gemacht, Push lief über den
+schon konfigurierten Git Credential Manager ohne weiteren Login-Schritt.
+Branch heißt `main` (vorher `master`, umbenannt vor dem Push).
+
 ## 2026-09-15 (Abend): Ausbaustufe — Molekulardynamik-Simulation
 
 Letzte der drei "richtig aufwendigen", API-freien Folge-Ausbaustufen
