@@ -92,3 +92,48 @@ def test_dock_unknown_pdb_id_returns_400():
     resp = client.post("/api/dock", json={"pdb_id": "ZZZZ", "ligand_query": "benzamidine"})
     assert resp.status_code == 400
     assert "error" in resp.json()
+
+
+def test_pdb_ligand_small_molecule():
+    resp = client.post("/api/pdb-ligand", json={"pdb_id": "3PTB"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["common_name"].lower() == "benzamidine"
+    assert len(data["atoms"]) > 0
+    assert all("H" != a["element"] for a in data["atoms"])  # keine ergänzten H
+
+
+def test_pdb_ligand_peptide_fallback():
+    # 4ZGM hat keinen Klein-Molekül-Liganden, nur die Semaglutid-Peptidkette --
+    # prüft die Längen-Heuristik in docking._find_ligand_lines().
+    resp = client.post("/api/pdb-ligand", json={"pdb_id": "4ZGM"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "Peptid" in data["common_name"]
+    assert len(data["atoms"]) > 100  # ein ~28-Reste-Peptid, nicht nur ein paar Atome
+
+
+def test_pdb_ligand_explicit_chain_ids():
+    # 4OGA: Insulin (Ketten A+B) an Site 1 seines Rezeptors. Kette F ist ein noch
+    # kürzeres, aber zum Rezeptor gehörendes Peptid -- ohne explizite chain_ids
+    # würde die Längen-Heuristik das fälschlich als "Ligand" wählen, siehe
+    # docs/stand.md. Prüft außerdem, dass RDKit alle 3 echten Insulin-
+    # Disulfidbrücken (A6-A11, A7-B7, A20-B19) über die Ketten hinweg findet.
+    resp = client.post("/api/pdb-ligand", json={"pdb_id": "4OGA", "chain_ids": ["A", "B"]})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "A+B" in data["common_name"]
+    sulfur_count = sum(1 for a in data["atoms"] if a["element"] == "S")
+    assert sulfur_count == 6
+
+
+def test_pdb_ligand_unknown_chain_id_returns_400():
+    resp = client.post("/api/pdb-ligand", json={"pdb_id": "4OGA", "chain_ids": ["Z"]})
+    assert resp.status_code == 400
+    assert "error" in resp.json()
+
+
+def test_pdb_ligand_invalid_pdb_id_returns_400():
+    resp = client.post("/api/pdb-ligand", json={"pdb_id": "not-an-id"})
+    assert resp.status_code == 400
+    assert "error" in resp.json()

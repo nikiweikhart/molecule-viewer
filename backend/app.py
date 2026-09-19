@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from chem import ResolveError, resolve
 from chemspace import ChemicalSpaceError, build_chemical_space
-from docking import DockingError, dock
+from docking import DockingError, dock, pdb_ligand
 from dynamics import run_md
 from equation import EquationError, build_equation_reaction
 from explain import explain
@@ -35,6 +35,12 @@ class ChemicalSpaceRequest(BaseModel):
 class DockRequest(BaseModel):
     pdb_id: str
     ligand_query: str
+
+
+class PdbLigandRequest(BaseModel):
+    pdb_id: str
+    hetero_code: str | None = None
+    chain_ids: list[str] | None = None
 
 
 class DynamicsRequest(BaseModel):
@@ -91,6 +97,14 @@ def api_chemical_space(req: ChemicalSpaceRequest):
 def api_dock(req: DockRequest):
     try:
         return dock(req.pdb_id, req.ligand_query)
+    except DockingError as e:
+        return JSONResponse(status_code=400, content={"error": str(e)})
+
+
+@app.post("/api/pdb-ligand")
+def api_pdb_ligand(req: PdbLigandRequest):
+    try:
+        return pdb_ligand(req.pdb_id, req.hetero_code, req.chain_ids)
     except DockingError as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
 

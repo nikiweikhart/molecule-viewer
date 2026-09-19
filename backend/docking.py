@@ -33,6 +33,14 @@ MEEKO_EXPORT = VENV_SCRIPTS / "mk_export.exe"
 
 RCSB_FILES = "https://files.rcsb.org/download"
 RCSB_DATA = "https://data.rcsb.org/rest/v1/core/entry"
+RCSB_CHEMCOMP = "https://data.rcsb.org/rest/v1/core/chemcomp"
+
+# Peptid-Wirkstoffe (z.B. Semaglutid, siehe pdb_ligand()) sind i.d.R. deutlich
+# kürzer als das Zielprotein, an das sie binden -- diese Spanne grenzt eine
+# plausible Peptid-Ligand-Kette von einer Rezeptor-/Enzym-Kette ab. Grobe
+# Heuristik, an den beiden konkret getesteten Fällen (Semaglutid: 28-31 Reste,
+# GLP-1-Rezeptor-ECD/-Volllänge: 100-380 Reste) kalibriert, siehe pdb_ligand().
+_PEPTIDE_LIGAND_MAX_RESIDUES = 60
 
 # Häufige Nicht-Liganden-HETATM-Reste: Wasser, Ionen, Kristallisationshilfsstoffe.
 _IGNORED_HET_RESNAMES = {
@@ -142,6 +150,219 @@ def _find_reference_ligand(pdb_text: str) -> dict:
         "z": max(max(zs) - min(zs) + 2 * _BOX_PADDING, _MIN_BOX_SIZE),
     }
     return {"resname": best_key[0], "center": center, "size": size}
+
+
+def _group_hetero_ligands(pdb_text: str) -> dict[tuple, list[str]]:
+    """Wie _find_reference_ligand(), aber gibt die rohen HETATM-Zeilen pro
+    Nicht-Ignorierter Gruppe zurück statt nur die Box -- gebraucht von
+    pdb_ligand(), um daraus tatsächlich Atome/Bindungen zu bauen."""
+    groups: dict[tuple, list[str]] = {}
+    for line in pdb_text.splitlines():
+        if not line.startswith("HETATM"):
+            continue
+        if line[16] not in (" ", "A"):  # AltLoc: nur die primäre Konformation
+            continue
+        resname = line[17:20].strip()
+        if resname in _IGNORED_HET_RESNAMES:
+            continue
+        chain_id = line[21].strip() or "A"
+        resseq = line[22:26].strip()
+        groups.setdefault((resname, chain_id, resseq), []).append(line)
+    return groups
+
+
+def _protein_chain_lines(pdb_text: str) -> dict[str, list[str]]:
+    chains: dict[str, list[str]] = {}
+    for line in pdb_text.splitlines():
+        if not line.startswith("ATOM"):
+            continue
+        if line[16] not in (" ", "A"):
+            continue
+        chain_id = line[21].strip() or "A"
+        chains.setdefault(chain_id, []).append(line)
+    return chains
+
+
+def _residue_count(lines: list[str]) -> int:
+    return len({(line[22:26].strip(), line[26]) for line in lines})
+
+
+def _find_ligand_lines(
+    pdb_text: str, hetero_code: str | None, chain_ids: list[str] | None = None
+) -> tuple[str, list[str], bool]:
+    """Wählt die Atomzeilen des Liganden, den pdb_ligand() anzeigen soll.
+
+    Drei Fälle, in dieser Reihenfolge geprüft:
+    0. Explizite Ketten-Auswahl (chain_ids): überspringt jede Heuristik --
+       gebraucht, wenn der Ligand aus mehreren Ketten besteht (z.B. Insulin:
+       A- und B-Kette, über 3 Disulfidbrücken verbunden) oder wenn die
+       Längen-Heuristik unten fehlschlagen würde, weil eine noch kürzere,
+       aber gar nicht zum Liganden gehörende Kette existiert (bei 4OGA ist
+       Kette F ein 16 Reste kurzes Rezeptor-eigenes Peptid, das ohne diese
+       Override fälschlich als "der Ligand" gewählt würde -- kürzer als
+       Insulins A-/B-Kette mit je 21 Resten).
+    1. Peptid-Ligand-Heuristik: gibt es (mind.) eine Protein-Kette in Peptid-
+       Wirkstoff-Länge (siehe _PEPTIDE_LIGAND_MAX_RESIDUES) UND eine deutlich
+       längere Kette (das vermutliche Zielprotein), wird die kürzeste solche
+       Kette als Ligand behandelt -- Fall Semaglutid an seinem Rezeptor.
+       Kommt VOR dem HETATM-Fall, weil manche solcher Strukturen zusätzlich
+       einen kleinen, für den Liganden irrelevanten Kristallisationszusatz
+       als HETATM neben der Peptidkette haben (z.B. ein PEG-Molekül in
+       4ZGM) -- ohne diese Reihenfolge würde der falsche, viel kleinere
+       "Ligand" gewählt.
+    2. Klein-Molekül-HETATM: wie beim Docking (_find_reference_ligand) die
+       größte Nicht-Ignorierte HETATM-Gruppe, optional per hetero_code
+       (PDB-Chemical-Component-ID, z.B. "BEN") gezielt ausgewählt.
+
+    Gibt (label, Zeilen, ist_peptid_fallback) zurück.
+    """
+    if chain_ids:
+        wanted = {c.strip().upper() for c in chain_ids}
+        chains = _protein_chain_lines(pdb_text)
+        missing = wanted - chains.keys()
+        if missing:
+            raise DockingError(f"Kette(n) {', '.join(sorted(missing))} nicht in dieser Struktur gefunden.")
+        lines = [line for c in sorted(wanted) for line in chains[c]]
+        return f"Peptid, Kette {'+'.join(sorted(wanted))}", lines, True
+
+    if not hetero_code:
+        chains = _protein_chain_lines(pdb_text)
+        chain_sizes = {c: _residue_count(lines) for c, lines in chains.items()}
+        peptide_chains = {c: n for c, n in chain_sizes.items() if 5 <= n <= _PEPTIDE_LIGAND_MAX_RESIDUES}
+        receptor_chains = {c: n for c, n in chain_sizes.items() if n > _PEPTIDE_LIGAND_MAX_RESIDUES}
+        if peptide_chains and receptor_chains:
+            ligand_chain = min(peptide_chains, key=peptide_chains.get)
+            return f"Peptid, Kette {ligand_chain}", chains[ligand_chain], True
+
+    hetero_groups = _group_hetero_ligands(pdb_text)
+
+    if hetero_code:
+        code = hetero_code.strip().upper()
+        matches = {k: v for k, v in hetero_groups.items() if k[0] == code}
+        if not matches:
+            raise DockingError(f"Kein HETATM-Rest '{code}' in dieser Struktur gefunden.")
+        best_key = max(matches, key=lambda k: len(matches[k]))
+        return best_key[0], matches[best_key], False
+
+    if hetero_groups:
+        best_key = max(hetero_groups, key=lambda k: len(hetero_groups[k]))
+        return best_key[0], hetero_groups[best_key], False
+
+    raise DockingError(
+        "Diese Struktur hat weder einen erkennbaren Klein-Molekül-Liganden (nur "
+        "Wasser/Ionen/Kristallisationshilfsstoffe gefunden) noch eine deutlich "
+        "kürzere Kette, die sich als Peptid-Ligand deuten ließe."
+    )
+
+
+_PT = Chem.GetPeriodicTable()
+
+
+def _hill_formula(elements: list[str]) -> str:
+    from collections import Counter
+
+    counts = Counter(elements)
+    parts = []
+    if "C" in counts:
+        parts.append(("C", counts.pop("C")))
+        if "H" in counts:
+            parts.append(("H", counts.pop("H")))
+    for el in sorted(counts):
+        parts.append((el, counts[el]))
+    return "".join(f"{el}{n if n > 1 else ''}" for el, n in parts)
+
+
+def _atoms_molweight(elements: list[str]) -> float:
+    return round(sum(_PT.GetAtomicWeight(el) for el in elements), 2)
+
+
+def _lookup_chemcomp_name(resname: str) -> str | None:
+    try:
+        resp = requests.get(f"{RCSB_CHEMCOMP}/{resname}", timeout=10)
+        if resp.status_code == 200:
+            name = resp.json().get("chem_comp", {}).get("name")
+            if name:
+                return name.title()
+    except requests.RequestException:
+        pass
+    return None
+
+
+def pdb_ligand(pdb_id: str, hetero_code: str | None = None, chain_ids: list[str] | None = None) -> dict:
+    """Lädt eine PDB-Struktur und zeigt den darin gefundenen Liganden als
+    eigenständiges Molekül -- ganz ohne Docking-Rechnung, im gleichen
+    Antwortformat wie chem.resolve() (atoms/bonds/facts/common_name), damit
+    das Frontend nichts Neues dafür bauen muss.
+
+    Bewusst KEINE Wasserstoffe ergänzt (anders als chem._build_structure()):
+    das wären erfundene H-Positionen auf einer fremden, real gemessenen
+    Geometrie. Aus dem gleichen Grund auch keine RDKit-Deskriptoren wie LogP/
+    TPSA/H-Brücken -- die bräuchten korrekte Valenzen inkl. H, die wir hier
+    nicht haben. Nur Summenformel und Molmasse werden direkt aus den
+    vorhandenen Atomen berechnet (ehrlich, aber ohne H in beiden Werten).
+    Bindungsordnung wird per RDKit-Abstandsheuristik geraten (ConnectTheDots)
+    -- für die reine 3D-Darstellung (Kugel-Stab zeigt Bindungen ohnehin ohne
+    Doppelbindungs-Unterscheidung) ausreichend, aber nicht chemisch bewiesen.
+    """
+    pdb_path, _protein_name = fetch_pdb(pdb_id)
+    pdb_text = pdb_path.read_text(encoding="utf-8")
+
+    label, lines, is_peptide = _find_ligand_lines(pdb_text, hetero_code, chain_ids)
+
+    block = "\n".join(lines) + "\nEND\n"
+    mol = Chem.MolFromPDBBlock(block, sanitize=False, removeHs=False, proximityBonding=True)
+    if mol is None or mol.GetNumAtoms() == 0:
+        raise DockingError(f"Konnte den Liganden aus '{pdb_id}' nicht als Molekül lesen.")
+
+    conformer = mol.GetConformer()
+    atoms = []
+    elements = []
+    for atom in mol.GetAtoms():
+        pos = conformer.GetAtomPosition(atom.GetIdx())
+        elements.append(atom.GetSymbol())
+        atoms.append({"element": atom.GetSymbol(), "x": pos.x, "y": pos.y, "z": pos.z})
+    bonds = [{"a": b.GetBeginAtomIdx(), "b": b.GetEndAtomIdx()} for b in mol.GetBonds()]
+
+    facts = {
+        "formula": _hill_formula(elements),
+        "molweight": _atoms_molweight(elements),
+        "logp": "–",
+        "tpsa": "–",
+        "h_donors": "–",
+        "h_acceptors": "–",
+        "rotatable_bonds": "–",
+    }
+
+    note = (
+        "Reale, unveränderte Kristallstruktur -- keine Wasserstoffe enthalten "
+        "(Summenformel/Molmasse deshalb ohne H), Bindungsordnung aus 3D-Abständen "
+        "geschätzt, weitere Fakten (LogP, TPSA, H-Brücken) deshalb nicht verfügbar."
+    )
+    if is_peptide:
+        common_name = f"Peptid-Ligand aus {pdb_id.upper()} ({label.split(', ')[1]})"
+        if chain_ids:
+            note += (
+                " Ligand wurde über eine fest angegebene Kettenauswahl geladen "
+                "(nicht über die Längen-Heuristik) -- z.B. nötig, wenn der Ligand "
+                "aus mehreren Ketten besteht (wie Insulins A- und B-Kette)."
+            )
+        else:
+            note += (
+                " Kein Klein-Molekül-Ligand gefunden -- die kürzeste Protein-Kette wurde "
+                "als vermutlicher Peptid-Wirkstoff angezeigt (Längen-Heuristik, keine "
+                "chemische Bestätigung der Identität)."
+            )
+    else:
+        common_name = _lookup_chemcomp_name(label) or label
+
+    return {
+        "atoms": atoms,
+        "bonds": bonds,
+        "facts": facts,
+        "common_name": common_name,
+        "iupac_name": None,
+        "note": note,
+    }
 
 
 def prepare_receptor(pdb_path: Path) -> Path:
@@ -288,3 +509,16 @@ if __name__ == "__main__":
     print("pocket_center:", result["pocket_center"])
     print("affinities (kcal/mol):", result["affinities"])
     print("ligand-pose atoms:", len(result["ligand"]["atoms"]), "bonds:", len(result["ligand"]["bonds"]))
+
+    print()
+    for pdb_id in ["3PTB", "4ZGM", "7KI0"]:
+        print(f"--- pdb_ligand({pdb_id!r}) ---")
+        try:
+            lig = pdb_ligand(pdb_id)
+            print("common_name:", lig["common_name"])
+            print("formula:", lig["facts"]["formula"], "| molweight:", lig["facts"]["molweight"])
+            print("atoms:", len(lig["atoms"]), "bonds:", len(lig["bonds"]))
+            print("note:", lig["note"])
+        except DockingError as e:
+            print("ERROR:", e)
+        print()

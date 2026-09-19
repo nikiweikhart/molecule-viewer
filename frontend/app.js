@@ -44,6 +44,85 @@ const CHEMSPACE_EXAMPLE_SET = [
   "cholesterol", "testosterone",
 ];
 
+const libraryEl = document.getElementById("library");
+
+// Bibliothek: Alternative zum manuellen Eintippen, für Chemie-Anfänger --
+// bewusst nur Alltagsnamen, keine Formeln/SMILES sichtbar (die zeigt das
+// Fakten-Panel nach dem Laden ohnehin automatisch). Kategorien orientieren
+// sich am CHEMSPACE_EXAMPLE_SET oben, plus zwei zusätzliche ("Hormone",
+// "Haushalt & Reinigung"), die zu den dort schon vorhandenen Beispiel-
+// Molekülen passen (Testosteron war schon im chemspace-Set, Isopropanol war
+// im "Alkohole"-Cluster). Bewusst KEINE großen Peptid-Wirkstoffe über
+// /api/resolve -- RDKits EmbedMolecule wäre dafür unzuverlässig/langsam.
+// Semaglutid und Insulin gehen trotzdem, aber über den separaten
+// /api/pdb-ligand-Pfad (echte Kristallstruktur-Koordinaten, kein Embedding).
+const LIBRARY_CATEGORIES = [
+  {
+    title: "Alltagsstoffe",
+    items: [
+      { label: "Wasser", query: "water" },
+      { label: "Zucker", query: "sucrose" },
+      { label: "Koffein", query: "caffeine" },
+      { label: "Alkohol", query: "ethanol" },
+    ],
+  },
+  {
+    title: "Schmerz & Fieber",
+    items: [
+      { label: "Aspirin", query: "aspirin" },
+      { label: "Ibuprofen", query: "ibuprofen" },
+      { label: "Paracetamol", query: "paracetamol" },
+    ],
+  },
+  {
+    title: "Bausteine des Körpers",
+    items: [
+      { label: "Glycin", query: "glycine" },
+      { label: "Alanin", query: "alanine" },
+      { label: "Phenylalanin", query: "phenylalanine" },
+    ],
+  },
+  {
+    title: "Vitamine",
+    items: [
+      { label: "Vitamin C", query: "ascorbic acid" },
+      { label: "Vitamin D", query: "cholecalciferol" },
+    ],
+  },
+  {
+    title: "Süßes & Fette",
+    items: [
+      { label: "Traubenzucker", query: "glucose" },
+      { label: "Fruchtzucker", query: "fructose" },
+      { label: "Cholesterin", query: "cholesterol" },
+    ],
+  },
+  {
+    title: "Hormone",
+    items: [
+      { label: "Testosteron", query: "testosterone" },
+      { label: "Östrogen", query: "estradiol" },
+      { label: "Adrenalin", query: "epinephrine" },
+    ],
+  },
+  {
+    title: "Haushalt & Reinigung",
+    items: [
+      { label: "Essig", query: "acetic acid" },
+      { label: "Desinfektionsmittel", query: "isopropanol" },
+    ],
+  },
+  {
+    title: "Peptid-Wirkstoffe (aus echten 3D-Messungen)",
+    hint: "Lädt die reale, gemessene Struktur direkt aus der Proteindatenbank (RCSB PDB) statt sie neu zu berechnen — deshalb funktioniert das auch für Wirkstoffe, die für die normale Auflösung zu groß wären.",
+    className: "library-category-peptide",
+    items: [
+      { label: "Ozempic / Semaglutid", pdbId: "4ZGM" },
+      { label: "Insulin (an seinem Rezeptor)", pdbId: "4OGA", chainIds: ["A", "B"] },
+    ],
+  },
+];
+
 const dockingPdbInput = document.getElementById("docking-pdb-input");
 const dockingLigandInput = document.getElementById("docking-ligand-input");
 const dockingExampleButton = document.getElementById("docking-example");
@@ -185,18 +264,99 @@ async function resolveQuery(query) {
   return data;
 }
 
-async function loadIntoSlot(index, query) {
-  const slot = ensureSlot(index);
-  const data = await resolveQuery(query);
-
+function applyResolvedData(slot, data) {
   slot.viewer.setMolecule(data.atoms, data.bonds);
   slot.viewer.setMode(currentMode);
   renderFacts(slot, data.facts);
   renderNames(slot, data);
   loadExplanation(slot, data); // läuft im Hintergrund weiter, blockiert nichts
+}
 
+async function loadIntoSlot(index, query) {
+  const slot = ensureSlot(index);
+  const data = await resolveQuery(query);
+  applyResolvedData(slot, data);
   return data;
 }
+
+async function resolvePdbLigand(pdbId, heteroCode, chainIds) {
+  const response = await fetch("/api/pdb-ligand", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pdb_id: pdbId, hetero_code: heteroCode || null, chain_ids: chainIds || null }),
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.error || "Unbekannter Fehler.");
+  }
+  return data;
+}
+
+async function loadPdbLigandIntoSlot(index, pdbId, heteroCode, chainIds) {
+  const slot = ensureSlot(index);
+  const data = await resolvePdbLigand(pdbId, heteroCode, chainIds);
+  applyResolvedData(slot, data);
+  return data;
+}
+
+function createLibraryCard(item) {
+  const card = document.createElement("button");
+  card.type = "button";
+  card.className = "library-card";
+  card.textContent = item.label;
+
+  card.addEventListener("click", async () => {
+    if (card.classList.contains("loading")) return;
+    card.classList.add("loading");
+    hide(errorEl);
+    hide(noteEl);
+
+    try {
+      const data = item.pdbId
+        ? await loadPdbLigandIntoSlot(0, item.pdbId, item.heteroCode, item.chainIds)
+        : await loadIntoSlot(0, item.query);
+      if (data.note) show(noteEl, data.note);
+      cardsEl.scrollIntoView({ behavior: "smooth", block: "start" });
+    } catch (err) {
+      show(errorEl, err.message || "Unbekannter Fehler.");
+    } finally {
+      card.classList.remove("loading");
+    }
+  });
+
+  return card;
+}
+
+function renderLibrary() {
+  for (const category of LIBRARY_CATEGORIES) {
+    const section = document.createElement("div");
+    section.className = "library-category";
+    if (category.className) section.classList.add(category.className);
+
+    const title = document.createElement("div");
+    title.className = "library-category-title";
+    title.textContent = category.title;
+    section.appendChild(title);
+
+    if (category.hint) {
+      const hint = document.createElement("div");
+      hint.className = "library-category-hint";
+      hint.textContent = category.hint;
+      section.appendChild(hint);
+    }
+
+    const grid = document.createElement("div");
+    grid.className = "library-grid";
+    for (const item of category.items) {
+      grid.appendChild(createLibraryCard(item));
+    }
+    section.appendChild(grid);
+
+    libraryEl.appendChild(section);
+  }
+}
+
+renderLibrary();
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();

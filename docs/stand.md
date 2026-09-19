@@ -1,5 +1,163 @@
 # Stand: Molekül-Viewer
 
+## 2026-09-19 (Fortsetzung): Insulin an seinem Rezeptor (4OGA) ergänzt
+
+Direkte Folge auf den Eintrag unten, in derselben Sitzung: Niki wollte Insulin
+doch noch in die Bibliothek aufnehmen, obwohl die vorherige Runde 4INS (Insulin
+allein, ohne Rezeptor) dafür als ungeeignet verworfen hatte.
+
+**4OGA gefunden und verifiziert** ("Insulin in complex with Site 1 of the
+human insulin receptor", per echtem RCSB-Abruf bestätigt) — aber ein
+komplizierterer Fall als Semaglutid: 6 Ketten (A=21, B=21 sichtbare Reste
+[volle B-Kette hat 30, der Rest ist im Kristall ungeordnet — beim Andocken an
+den Rezeptor löst sich das B-Ketten-Ende bekanntermaßen vom Insulin-Kern,
+passt also zur echten Biologie], C=118, D=114, E=288, F=15/16). Insulin
+besteht aus **zwei** Ketten (A+B, über 3 Disulfidbrücken verbunden) — die
+bestehende "kürzeste-Kette"-Heuristik aus dem Eintrag unten kann das nicht
+abbilden. Schlimmer: **Kette F (15 Reste) ist selbst kürzer als A oder B**
+und gehört zum Rezeptor (das "α-CT-Peptid", ein rezeptor-eigenes Fragment,
+das an der Bindungsstelle mitwirkt) — die Heuristik hätte also nicht nur
+"nur eine Kette statt zwei" gewählt, sondern die **falsche** Kette.
+
+**Lösung: `chain_ids` als dritte, explizite Auswahl-Möglichkeit in
+`_find_ligand_lines()`** (`backend/docking.py`), geprüft VOR der Peptid-
+Heuristik und dem HETATM-Fall. Übergibt man `chain_ids: ["A", "B"]`, werden
+genau diese Ketten kombiniert und die Heuristik komplett übersprungen — kein
+Rätselraten mehr nötig, wenn die Kettenzugehörigkeit ohnehin bekannt ist (wie
+hier: aus der Biologie, nicht aus der Struktur allein ableitbar). Per
+Diagnose-Skript vorab bestätigt, dass RDKits `ConnectTheDots`-Bindungs-
+erkennung dabei alle **3 echten Insulin-Disulfidbrücken** (A6-A11, A7-B7,
+A20-B19 — mit der Literatur abgeglichen) über die Kettengrenze hinweg
+korrekt findet, rein aus dem 3D-Abstand der Schwefelatome. `hetero_code` und
+`chain_ids` schließen sich gegenseitig aus (chain_ids hat Vorrang, falls
+beide angegeben würden — kommt in der Praxis aber nicht vor, das Frontend
+nutzt nur eins von beiden pro Bibliothek-Karte).
+
+`POST /api/pdb-ligand` und `pdb_ligand()` haben dafür ein neues optionales
+Feld/Argument `chain_ids` bekommen. Frontend: neue Karte "Insulin (an seinem
+Rezeptor)" in der "Peptid-Wirkstoffe"-Kategorie (`frontend/app.js`,
+`{pdbId: "4OGA", chainIds: ["A", "B"]}`), `loadPdbLigandIntoSlot()`/
+`resolvePdbLigand()` geben `chainIds` einfach durch.
+
+Backend-Tests ergänzt: expliziter Zwei-Ketten-Fall (prüft u.a. die 6
+Schwefelatome), unbekannte Ketten-ID → 400.
+
+**Getestet im Browser:** Klick auf "Insulin (an seinem Rezeptor)" lädt
+sichtbar eine kompakte, verknäulte Kernstruktur mit einem längeren,
+freihängenden Ende (genau die erwartete Form — kompakter A/B-Kern plus das
+ungeordnete B-Ketten-Ende) statt einer einzelnen kurzen Kette. Fakten-Panel
+zeigt Summenformel (`C207N51O63S6`, 6 Schwefel — stimmt mit den 3
+Disulfidbrücken überein) und Molmasse korrekt, die übrigen fünf Felder als
+"–". Hinweistext erklärt korrekt, dass eine feste Kettenauswahl statt der
+Längen-Heuristik verwendet wurde. Keine Konsolenfehler.
+
+## 2026-09-19 (autonomer Durchlauf, ~45 Min.): PDB-Liganden direkt anzeigen + Bibliothek-Bereich
+
+Niki war ~30-60 Min. weg und hat zwei zusammenhängende Erweiterungen als fertige
+Prompts vorgelegt: bei normalen Umsetzungsentscheidungen selbst entscheiden statt
+zu warten, nur bei echten Sackgassen anhalten. Beide Teile sind fertig geworden.
+
+**Teil 1 — `POST /api/pdb-ligand` (neu, `backend/docking.py` + `backend/app.py`):**
+Lädt eine PDB-Struktur und zeigt den darin gefundenen Liganden als eigenständiges
+Molekül, ganz ohne Docking-Rechnung — gleiches Antwortformat wie `/api/resolve`
+(`atoms`/`bonds`/`facts`/`common_name`/`iupac_name`/`note`), damit das Frontend
+nichts Neues dafür bauen musste.
+
+- Bewusst **keine** ergänzten Wasserstoffe (anders als `chem._build_structure()`)
+  — das wären erfundene H-Positionen auf einer real gemessenen Geometrie. Aus
+  dem gleichen Grund auch keine RDKit-Deskriptoren (LogP/TPSA/H-Brücken/drehbare
+  Bindungen) — die bräuchten korrekte Valenzen inkl. H. Diese fünf Fakten-Felder
+  zeigen für PDB-Liganden ein `"–"`. Nur Summenformel und Molmasse werden direkt
+  aus den vorhandenen (Schwer-)Atomen berechnet, per RDKits Periodensystem
+  (`Chem.GetPeriodicTable()`) statt einer selbst gepflegten Atomgewichts-Tabelle.
+- Bindungen kommen aus `Chem.MolFromPDBBlock(..., proximityBonding=True)` —
+  RDKits eigene Abstands-Bindungserkennung (`ConnectTheDots`), unsanitisiert.
+  Bindungsordnung ist damit geraten, nicht chemisch bewiesen — für die reine
+  3D-Darstellung egal, weil der Viewer Bindungen ohnehin nur als Zylinder ohne
+  Doppelbindungs-Unterscheidung zeichnet.
+- **Zwei Liganden-Fälle, in dieser Reihenfolge geprüft** (`_find_ligand_lines()`):
+  1. **Peptid-Ligand-Heuristik, bewusst VOR der Klein-Molekül-Suche geprüft:**
+     gibt es eine Protein-Kette in Peptid-Wirkstoff-Länge (5-60 Reste) UND eine
+     deutlich längere Kette (das vermutliche Zielprotein), wird die kürzeste
+     solche Kette als Ligand behandelt. Musste vor dem HETATM-Fall kommen, weil
+     4ZGM (siehe unten) zusätzlich ein für den Liganden irrelevantes HETATM-
+     Molekül (`32M`, ein PEG-artiger Kristallisationszusatz, laut RCSB-Chemcomp-
+     API "3,6,9,12,15,18-hexaoxahexacosan-1-ol") neben der Peptidkette hat — mit
+     der ursprünglichen Reihenfolge (HETATM zuerst) wäre fälschlich das PEG-
+     Molekül als "Ligand" gewählt worden. Per echtem RCSB-Abruf verifiziert:
+     4ZGM hat Kette A (100 Reste, GLP-1-Rezeptor-ECD) und Kette B (28 Reste,
+     Semaglutid) — B wird korrekt gewählt. 7KI0 (Kette P, 29 Reste, unter A/B/G/N/R
+     mit 56-384 Resten) ebenso. Offen benannt in der zurückgegebenen `note`:
+     reine Längen-Heuristik, keine chemische Bestätigung der Identität.
+  2. **Klein-Molekül-HETATM** (wie schon beim Docking, `_find_reference_ligand`):
+     die größte Nicht-Ignorierte HETATM-Gruppe, optional per `hetero_code`
+     (PDB-Chemical-Component-ID, z. B. `"BEN"`) gezielt ausgewählt.
+- **Insulin (4INS) zuerst geprüft, aber NICHT verwendet:** 4INS enthält nur
+  die vier kurzen Insulin-Ketten (A/B/C/D, 21-30 Reste) ohne Rezeptor — die
+  Peptid-Heuristik braucht eine deutlich längere Gegenkette, um zwischen
+  "Ligand" und "Rezeptor" zu unterscheiden, die hier fehlt. Stattdessen
+  **4OGA** ("Insulin in complex with Site 1 of the human insulin receptor")
+  verwendet — siehe Folge-Eintrag unten, dort kam noch eine dritte
+  Auswahl-Möglichkeit (`chain_ids`) dazu, die dieser erste Durchlauf noch
+  nicht hatte.
+- Backend-Tests ergänzt (`backend/tests/test_api.py`): Klein-Molekül-Fall
+  (3PTB/Benzamidin), Peptid-Fallback (4ZGM/Semaglutid), ungültige PDB-ID.
+
+**Teil 2 — Bibliothek-Bereich (`frontend/index.html`, `style.css`, `app.js`):**
+Neue Sektion direkt unter dem Header, über dem Eingabefeld (als der zuerst
+sichtbare, einfachste Einstieg für Chemie-Anfänger) — Kategorien mit
+anklickbaren Karten, kein Fachjargon in der Auswahl selbst (Formel/SMILES
+zeigt das Fakten-Panel nach dem Laden ohnehin automatisch).
+
+- Kategorien wie vorgegeben (Alltagsstoffe, Schmerz & Fieber, Bausteine des
+  Körpers, Vitamine, Süßes & Fette), plus zwei zusätzliche, die zum schon
+  vorhandenen `CHEMSPACE_EXAMPLE_SET` passen: **Hormone** (Testosteron war
+  schon im chemspace-Set; dazu Östrogen/Estradiol, Adrenalin/Epinephrin) und
+  **Haushalt & Reinigung** (Essigsäure — auch Edukt der Veresterungs-Reaktion
+  weiter unten —, Isopropanol als "Desinfektionsmittel").
+- Eigene Kategorie **"Peptid-Wirkstoffe (aus echten 3D-Messungen)"** mit einer
+  Karte "Ozempic / Semaglutid" (PDB `4ZGM`), die **nicht** `/api/resolve`
+  aufruft, sondern den neuen `/api/pdb-ligand`-Endpunkt aus Teil 1 — visuell
+  durch gestrichelte Kartenränder (`.library-category-peptide`) leicht von den
+  übrigen, per Namen auflösbaren Karten abgesetzt, plus ein erklärender
+  Hinweistext direkt unter dem Kategorietitel.
+- Technisch: hartkodierte `LIBRARY_CATEGORIES`-Liste in `app.js` (gleiches
+  Muster wie `CHEMSPACE_EXAMPLE_SET`), Karten dynamisch gerendert. Ein Klick
+  ruft `loadIntoSlot()` bzw. (Peptid-Karte) das neue `loadPdbLigandIntoSlot()`
+  auf — beide teilen sich jetzt eine gemeinsame `applyResolvedData()`-Funktion
+  (kleiner Refactor von `loadIntoSlot()`, das vorher die Anzeige-Logik direkt
+  enthielt), landen im Haupt-Viewer wie beim Chemischer-Raum-Klick, inkl.
+  sanftem Scroll nach oben.
+
+**Getestet im Browser** (`http://localhost:8001`, alle über die neuen
+Bibliothek-Karten UND direkt per `/api/resolve`-Aufruf gegengeprüft): Aspirin
+lädt korrekt aus der Bibliothek; Vitamin C löst zu "L-Ascorbic Acid" auf;
+Vitamin D (`cholecalciferol`), Testosteron, Östrogen (`estradiol`), Adrenalin
+(`epinephrine`), Essig (`acetic acid`), Desinfektionsmittel (`isopropanol`)
+und Zucker (`sucrose`) lösen alle korrekt auf. **Ozempic/Semaglutid-Karte**
+(der wichtigste Testfall): lädt die reale Semaglutid-Kette aus 4ZGM, zeigt
+sichtbar eine lange, verzweigte Peptidkette (keine kompakte kleine
+Molekülform), Fakten-Panel zeigt Summenformel/Molmasse korrekt und die
+restlichen fünf Felder korrekt als "–", Hinweistext erklärt die
+Peptid-Heuristik offen. Keine Konsolenfehler. Regressionscheck: normale
+Auflösung ("water" über das Eingabefeld) danach nochmal geprüft, lief
+einwandfrei.
+
+**Nebenbei aufgetreten — ein neuer Cache-Fallstrick, dokumentiert statt
+behoben (Browser-Verhalten, kein Code-Fehler):** Der allererste Ladeversuch
+zeigte die neuen Bibliothek-Karten optisch falsch (helle Standard-Button-
+Farben statt der dunklen `.library-card`-Gestaltung), obwohl `style.css` auf
+der Platte längst korrekt war. Ursache gefunden: `backend/app.py`s
+`StaticFiles`-Mount setzt keine `Cache-Control`-Header, und der Browser hatte
+`style.css` von einer früheren Sitzung (vor dieser Änderung) noch im
+HTTP-Cache und hat nicht neu validiert — selbst ein neuer Tab traf denselben
+Cache. Ein `fetch(..., {cache: "no-store"})` bekam sofort die korrekte,
+aktuelle Version. Für Niki relevant: **falls nach einer Frontend-Änderung an
+`style.css`/`app.js` die Seite optisch/funktional noch alt aussieht, obwohl
+der Server-Neustart nichts bringt (das ist ja ein reiner Static-File-Mount,
+kein `--reload`-Ziel) — harter Neu-Laden im Browser (Strg+Shift+R) oder
+Cache leeren, nicht am Code suchen.**
+
 ## 2026-09-19 (später): Ausbaustufe — Gleichungslöser, plus PubChem-Cache und Backend-Tests
 
 Niki wollte eine 10. Ausbaustufe: eine frei eingetippte Reaktionsgleichung
@@ -765,8 +923,19 @@ Antwort aber trotzdem alt bleibt:** hart neu starten — alte Prozesse per
 Bau von Protein-Docking einmal auf, vermutlich eine mtime-Verzögerung durch
 OneDrive-Sync im Projektordner.
 
+**Falls die Seite nach einer Frontend-Änderung (`style.css`/`app.js`) optisch
+oder funktional noch alt aussieht:** Browser-Cache, kein Server-Problem (der
+Static-File-Mount hat keine `--reload`-Funktion und braucht keine) — hart neu
+laden (Strg+Shift+R), siehe Fallstrick im Eintrag vom 2026-09-19 (autonomer
+Durchlauf) oben.
+
 Dann **`http://localhost:8001`** im Browser öffnen (Port 8001, nicht 8000 —
-siehe Fallstrick oben). Eingabefeld testen mit z. B. `aspirin`, `C6H12O6`,
+siehe Fallstrick oben). Ganz oben die neue **Bibliothek** ausprobieren — auf
+ein paar Karten klicken (z. B. "Aspirin", "Vitamin C"), und unter "Peptid-
+Wirkstoffe" auf "Ozempic / Semaglutid" (PDB `4ZGM`) und "Insulin (an seinem
+Rezeptor)" (PDB `4OGA`, zwei Ketten A+B) — beide über `/api/pdb-ligand`,
+kein Docking, dauert beim ersten Mal einen Moment. Danach Eingabefeld
+testen mit z. B. `aspirin`, `C6H12O6`,
 `CCO`, die drei Darstellungs-Buttons durchklicken, "+ Vergleichen" mit einem
 zweiten Molekül ausprobieren, unten die Veresterung über "▶ Ablaufen
 lassen" abspielen, beim neuen "Gleichungslöser"-Bereich "Beispiel laden"
@@ -793,12 +962,15 @@ schon vorhandene Pakete (RDKit, numpy, scipy).
 
 **Alle 6 ursprünglich vereinbarten Ausbaustufen sind erledigt, plus alle
 3 der "richtig aufwendigen" API-freien Folge-Ausbaustufen (chemischer
-Raum, Protein-Docking, Molekulardynamik), plus eine 10., von Niki am
-2026-09-19 gewünschte Ausbaustufe (Gleichungslöser).** Einzige offene
-Lücke aus dem Kern: KI-Erklärtext (Ausbaustufe 5) wartet weiter auf einen
-`ANTHROPIC_API_KEY` von Niki — `backend/.env.example` nach `backend/.env`
-kopieren, echten Key eintragen, Server neu starten. Alles andere läuft
-schon ohne das.
+Raum, Protein-Docking, Molekulardynamik), plus eine 10. (Gleichungslöser)
+und eine 11., zweiteilige Ausbaustufe vom 2026-09-19 (autonomer Durchlauf):
+PDB-Liganden direkt anzeigen (`/api/pdb-ligand`) + Bibliothek-Bereich im
+Frontend, samt Folge-Ergänzung um Insulin an seinem Rezeptor (4OGA, per
+neuem `chain_ids`-Parameter).** Einzige offene Lücke aus dem Kern:
+KI-Erklärtext (Ausbaustufe 5)
+wartet weiter auf einen `ANTHROPIC_API_KEY` von Niki — `backend/.env.example`
+nach `backend/.env` kopieren, echten Key eintragen, Server neu starten.
+Alles andere läuft schon ohne das.
 
 **Nächste Schritte sind komplett offen** — es gibt keine vereinbarte
 Ausbaustufe mehr, die noch aussteht. Ideen für kleinere Lücken/Politur,
@@ -809,6 +981,9 @@ Liganden vor dem Docken berücksichtigen (siehe Einschränkung oben), bei
 der Molekulardynamik echte Bindungslängen-Constraints (SHAKE/RATTLE)
 einbauen (siehe Einschränkung oben), die Atom-Zuordnung im Gleichungslöser
 verbessern (z. B. per lokaler Bindungsumgebung statt reinem Abstand vor-
-matchen, siehe Eintrag vom 2026-09-19), oder ein Export/Screenshot-Feature
+matchen, siehe Eintrag vom 2026-09-19), weitere Peptid-Wirkstoffe/Klein-
+Molekül-Karten zur Bibliothek ergänzen (z. B. per `hetero_code` oder
+`chain_ids`, siehe die beiden 2026-09-19-Einträge oben), oder ein
+Export/Screenshot-Feature
 und ein echtes Deployment (Render/Fly.io, braucht Linux-Vina-Build) —
 aber erst wieder anfangen, wenn Niki eine neue Richtung vorgibt.
