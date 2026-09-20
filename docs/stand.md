@@ -112,12 +112,14 @@ Ort am lebenden Deployment gefunden und gelöst (nicht vorab erraten):**
    Environment-Variable, Deploys auslösen) habe ich übernommen.
 2. **Öffentliches GitHub-Repo direkt per URL verbunden** (`select-repo` →
    "Public Git Repository"-Feld), nicht über die GitHub-App-OAuth-Verbindung
-   — vermeidet eine OAuth-Berechtigungsanfrage an Niki, kostet aber
-   Auto-Deploy bei zukünftigen Pushes (Render deployt dann nicht mehr
-   automatisch, siehe "Zum Wiedereinsteigen" unten für den manuellen
-   Redeploy-Weg). Falls Niki Auto-Deploy will: im Render-Dashboard unter
-   "Connect" den GitHub-Account verbinden (braucht seine OAuth-Freigabe,
-   deshalb nicht von mir selbst gemacht).
+   — vermeidet eine OAuth-Berechtigungsanfrage an Niki. **Korrektur, per
+   echtem Test im selben Durchlauf widerlegt:** Auto-Deploy funktioniert
+   auch so — ein `git push` löste beim nächsten Feature (siehe
+   "große Peptid-Wirkstoffe" unten) tatsächlich automatisch einen neuen
+   Deploy aus (Trigger zeigte "Auto-Deploy", nicht "Manual"). Render
+   pollt das öffentliche Repo offenbar selbst auf neue Commits, auch ohne
+   die GitHub-App-Verbindung. Ein `git push origin main` allein reicht
+   also doch.
 3. **Stolperstein 1 — Build lief safort durch, inkl. `vina-1.2.7` aus
    PyPI** (bestätigt: echte manylinux-Wheels für alle Kern-Pakete,
    `rdkit`/`meeko`/`gemmi`/`scipy`/`vina` installierten sich alle sauber).
@@ -174,6 +176,68 @@ Zwischenstände wurden committet und gepusht (5 Commits diesen Durchlauf:
 Haupt-Feature-Bündel, Render-Blueprint, Diagnose-Hilfe, meeko-Fix,
 Vina-CPU-Fix) — `git log` zeigt den vollen Weg inklusive der drei
 Stolpersteine, falls das später nochmal relevant wird.
+
+**Nachtrag, direkt im Anschluss: große Peptid-Wirkstoffe auch über das
+Haupt-Suchfeld.** Niki fragte nach dem Deployment, ob "sowas wie Ozempic"
+auch normal eingebbar geht -- bis dahin lief das nur über die eigene
+Bibliothek-Karte, die generische Auflösung endete für alle GLP-1-/Insulin-
+Präparate bewusst in der "zu groß"-Fehlermeldung (`MAX_HEAVY_ATOMS`).
+
+**Neue Datei `backend/large_peptides.py`**: kuratierte Zuordnung
+Wirkstoffname → reale RCSB-Struktur (PDB-ID + optionale `chain_ids`), jeder
+Eintrag einzeln gegen die echte RCSB-Struktur verifiziert (Kettenlänge UND
+Entity-Beschreibung abgeglichen, nicht nur aus der Volltextsuche-Trefferliste
+geraten):
+- **Semaglutide** (Ozempic/Wegovy/Rybelsus) → `4ZGM` (schon vorher als
+  Bibliothek-Karte im Einsatz).
+- **Liraglutide** (Victoza/Saxenda) → `4APD` -- eigenständige, unkomplizierte
+  Ein-Ketten-Struktur (per RCSB-Volltextsuche gefunden, Kette A mit genau 31
+  Resten bestätigt, exakt Liraglutides bekannte Länge).
+- **Tirzepatide** (Mounjaro) → `7FIM`, ein Cryo-EM-Komplex mit dem
+  GLP-1-Rezeptor + G-Protein + Nanobody (6 Ketten insgesamt) -- hier war
+  Vorsicht nötig: die bestehende Peptid-Längen-Heuristik (kürzeste Kette im
+  Bereich 5-60 Reste) hätte ohne Prüfung leicht die falsche Kette treffen
+  können (Kette G, G-Protein-γ-Untereinheit, hat mit 57 Resten fast die
+  gleiche Länge wie Tirzepatid selbst mit 27 modellierten Resten) -- per
+  echtem RCSB-Entity-Abruf verifiziert, dass Kette P (die kürzere) wirklich
+  "Tirzepatide" ist, nicht geraten.
+- **Insulin und gängige Analoga** (Lispro/Humalog, Aspart/Novorapid,
+  Glargin/Lantus) → alle über die schon bewährte `4OGA`-Struktur (explizite
+  `chain_ids: ["A","B"]`, wie bei der bestehenden Insulin-Bibliothekskarte).
+  Da die Analoga sich strukturell leicht vom gezeigten Wildtyp-Insulin
+  unterscheiden (einzelne Aminosäure-Austausche, keine öffentliche
+  Kristallstruktur für die Analoga selbst gefunden), bekommt der
+  Anzeigename einen klaren Zusatz ("Wildtyp-Struktur gezeigt") plus einen
+  erklärenden Satz im Hinweistext -- keine stillschweigende Vereinfachung.
+- **Bewusst NICHT aufgenommen: Dulaglutide/Trulicity** -- RCSB-Volltextsuche
+  lieferte keinen einzigen Treffer (es ist ein Fusionsprotein mit einem
+  IgG4-Fc-Teil, vermutlich nie öffentlich strukturell gelöst) -- bleibt bei
+  der ehrlichen "nicht erkannt"-Fehlermeldung, statt eine falsche PDB-ID
+  einzutragen.
+
+**Routing in `app.py`** (`/api/resolve`): prüft die Eingabe (direkt UND über
+`brand_names.BRAND_TO_SUBSTANCE` übersetzt) zuerst gegen
+`large_peptides.match()`, bevor die normale `chem.resolve()`-Auflösung
+überhaupt versucht wird -- vermeidet auch unnötige PubChem-Anfragen für
+Fälle, die ohnehin nur mit "zu groß" enden würden. Bei Treffer wird
+`docking.pdb_ligand()` aufgerufen (exakt der gleiche Code-Pfad wie die
+Bibliothek-Karten) und `common_name`/`note` mit dem hübschen Anzeigenamen
+bzw. dem Analog-Hinweis überschrieben.
+
+**Backend-Tests ergänzt**: Ozempic → echte Struktur statt Fehler (der alte
+Test, der die "zu groß"-Meldung erwartete, wurde entsprechend ersetzt),
+Wegovy/Mounjaro/Victoza/insulin liefern die richtigen Anzeigenamen, Lantus
+zeigt den Wildtyp-Hinweis, Trulicity scheitert weiterhin ehrlich. Alle 31
+Tests grün.
+
+**Getestet, lokal und auf der echten Live-Seite**: "Ozempic" ins
+Haupt-Eingabefeld getippt und aufgelöst -- zeigt jetzt die reale,
+verzweigte Semaglutid-Kette (`C137H207N...`, 3044 g/mol ohne H) statt der
+Fehlermeldung, keine Konsolenfehler. Ozempic/Wegovy/Mounjaro/Victoza/
+Lantus/insulin auch direkt gegen die Live-URL per `fetch()` durchgetestet,
+alle `200 OK` mit den erwarteten Anzeigenamen; Trulicity weiterhin `400`.
+Deploy lief diesmal komplett automatisch (`git push` allein reichte, siehe
+Korrektur oben) und war nach ca. 35 Sekunden live.
 
 ## 2026-09-20 (autonomer Durchlauf, ~1,5 Std.): Ausbaustufe — echte Protein-Faltung mit Boltz-2
 
@@ -1467,12 +1531,14 @@ Free-Tier, Deployment-Details siehe Eintrag ganz oben). Render-Dashboard:
 einloggen mit Nikis Google-Account, Service heißt `molecule-viewer`,
 Service-ID `srv-dantbfjtqb8s73d39tfg`.
 
-**Neuen Stand veröffentlichen (kein Auto-Deploy, siehe Eintrag oben Punkt
-2):** `git push origin main` reicht NICHT allein — im Render-Dashboard
-zusätzlich "Manual Deploy" → "Deploy latest commit" klicken (Chrome-Browser
-mit Nikis eingeloggter Render-Session, gleiches Muster wie beim GitHub-Repo).
-Build-Logs direkt im Dashboard unter "Logs", Shell-Zugriff gibt es auf dem
-Free-Tier nicht (nur per Upgrade).
+**Neuen Stand veröffentlichen:** einfach `git push origin main` — Render
+deployt automatisch neu, auch ohne die GitHub-App-Verbindung (siehe Eintrag
+oben Punkt 2, per echtem Test bestätigt). Dauert ca. 1-2 Minuten
+(Docker-Layer-Cache macht wiederholte Builds schnell, sofern sich
+`requirements.txt` nicht ändert). Build-/Laufzeit-Logs direkt im
+Render-Dashboard unter "Logs" (Chrome-Browser mit Nikis eingeloggter
+Render-Session, gleiches Muster wie beim GitHub-Repo) — Shell-Zugriff gibt
+es auf dem Free-Tier nicht (nur per Upgrade).
 
 **Lokal weiterentwickeln, wie gewohnt:**
 ```bash
