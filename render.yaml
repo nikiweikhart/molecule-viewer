@@ -1,0 +1,17 @@
+# Render Blueprint (render.com/docs/blueprint-spec) -- lässt Render den Service beim
+# Verbinden dieses Repos automatisch mit den richtigen Einstellungen anlegen ("New +" ->
+# "Blueprint"), statt jedes Feld von Hand im Dashboard auszufüllen.
+services:
+  - type: web
+    name: molecule-viewer
+    env: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: free
+    healthCheckPath: /
+    envVars:
+      # Optional -- ohne diesen Key läuft die App normal weiter, nur die KI-Erklärung
+      # (backend/explain.py) zeigt "nicht verfügbar" statt eines Textes. Im Render-
+      # Dashboard unter "Environment" eintragen, nicht hier im Klartext im Repo.
+      - key: ANTHROPIC_API_KEY
+        sync: false
