@@ -1,5 +1,10 @@
 # Molekül-Viewer
 
+**Live: [molecule-viewer.onrender.com](https://molecule-viewer.onrender.com)**
+(kostenloser Render-Free-Tier — die Instanz fährt nach Inaktivität herunter,
+ein erster Aufruf kann daher 50+ Sekunden dauern; Protein-Struktur-Vorhersage
+per Boltz-2 läuft nur lokal mit GPU, siehe `docs/stand.md`).
+
 Ein Tool, das aus einem Molekülnamen, einer Summenformel oder einem
 SMILES-Code ein rotierbares 3D-Modell im Browser baut — inklusive
 Fakten-Panel, Vergleichsmodus, Reaktions-Animationen, chemischem

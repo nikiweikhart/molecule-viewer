@@ -1,5 +1,180 @@
 # Stand: Molekül-Viewer
 
+## 2026-09-20 (später, mehrstündiger Durchlauf): Öffentliches Deployment — jetzt live
+
+**Live-URL: https://molecule-viewer.onrender.com** (Render, kostenloser Free-Tier).
+Niki hatte einen 5-Phasen-Auftrag gegeben: offene Punkte aus dem letzten
+Durchlauf schließen, die dokumentierten kleineren Lücken abarbeiten, das
+Projekt deploy-fähig machen, tatsächlich veröffentlichen, und den Stand hier
+festhalten. Alle fünf Phasen sind durch.
+
+**Phase 1 — offene Punkte geschlossen:**
+- **Boltz-2-Rendering visuell bestätigt, diesmal mit wirklich sichtbarem
+  Browser-Pane** (der letzte Durchlauf hatte das Pane unsichtbar laufen
+  lassen, wodurch `requestAnimationFrame` nie feuerte). Oxytocin vorhergesagt
+  und per Screenshot bestätigt: kompakte, sichtbar gefaltete Struktur mit
+  erkennbarer Disulfidbrücke (gelbe Schwefelatome), per Maus-Drag rotierbar.
+  "Wasser" als Regressionscheck ebenfalls sauber gerendert.
+- **`MAX_RESIDUES=50` empirisch getestet** (vorher nur eine konservative
+  Setzung ohne Messung): 36 Reste (Pankreatisches Polypeptid) ~50s, 50 Reste
+  (GB1-Domänen-Fragment) ~73s — beide weit unter dem 600s-Zeitbudget,
+  Skalierung mit der Länge spürbar überlinear, aber nicht explosionsartig.
+  Grenze bleibt bei 50 stehen (Begründung jetzt in `folding.py` als
+  Kommentar: eine Fortsetzung des Trends könnte bei deutlich längeren
+  Sequenzen ans Zeitbudget herankommen), aber jetzt mit echten Messwerten
+  statt einer Vermutung.
+
+**Phase 2 — dokumentierte kleinere Lücken abgearbeitet (Qualität vor
+Vollständigkeit, wie gefordert):**
+- **PubChem-Retry ergänzt** (`chem._request_with_retry`): wiederholt bei
+  Timeout/Verbindungsfehler/5xx bis zu 2x mit kurzem Backoff — ein echter
+  404 ("Molekül existiert nicht") wird bewusst NICHT wiederholt, das ist eine
+  gültige Antwort, kein Fehler. Ohne das hätte ein einzelner kurzer
+  Netzwerk-Hänger fälschlich dauerhaft im In-Memory-Cache gelandet (der
+  bestand schon seit dem 2026-09-19-Eintrag, nur ohne Retry).
+- **Formel-Mehrdeutigkeits-Heuristik verbessert** (`chem._pick_most_common_cid`):
+  wählt jetzt unter den (bis zu 8) niedrigsten CIDs den mit den meisten
+  bekannten Synonymen bei PubChem, statt einfach die niedrigste CID zu nehmen
+  — Näherung für "am bekanntesten" statt "am frühesten dokumentiert". Dabei
+  ein reales Problem gefunden und behoben: der erste Versuch wählte für
+  `C6H12O6` "An inositol" (545 Synonyme, aber ein ChEBI-Pseudo-Titel, kein
+  echter Stoffname) statt "D-Glucose" (162 Synonyme) — jetzt werden Titel mit
+  führendem unbestimmtem Artikel ("An ...", "A ...") bei der Auswahl
+  übersprungen, solange es eine "echt benannte" Alternative gibt. Ergebnis
+  jetzt: `C6H12O6` → **D-Glucose**, nicht mehr "Hexopyranose".
+- **PNG-Export/Screenshot-Feature ergänzt** — der in der letzten Ideen-Liste
+  offene Punkt. `viewer.js` bekam `captureScreenshot()` (rendert einmal neu
+  und liest sofort danach `canvas.toDataURL()`, bevor der Browser den
+  Drawing-Buffer leert — der Renderer läuft bewusst ohne
+  `preserveDrawingBuffer`, siehe die `gl.readPixels()`-Notiz im
+  2026-09-20-Eintrag oben). "PNG speichern"-Button jetzt auf jedem
+  Viewer-Frame (Haupt-Karte, Docking, Molekulardynamik, Boltz-2, Reaktion,
+  Gleichungslöser) — `app.js::downloadScreenshot()` als gemeinsamer Helfer.
+- **Backend-Tests für die drei genannten Lücken ergänzt**
+  (`tests/test_api.py`): `/api/fold` (Erfolgsfall + zwei Fehlerfälle —
+  der Erfolgsfall braucht `backend/.venv-boltz` und wird sauber
+  übersprungen, wenn die fehlt, z.B. auf einem frischen Deployment-Host),
+  Schweratom-Limit direkt per 155-Kohlenstoff-SMILES getestet (unabhängig
+  vom Ozempic-Umweg), Markennamen-Auflösung war schon vom letzten Durchlauf
+  abgedeckt. Alle 29 Tests grün (28 ohne den Boltz-Erfolgstest).
+- **Bewusst zurückgestellt, wie von Niki ausdrücklich erlaubt:**
+  Ladungszustände des Liganden vor dem Docken (pKa-Vorhersage ist ein
+  eigenes, nicht triviales Teilproblem) und SHAKE/RATTLE bei der MD (würde
+  den selbstgeschriebenen Velocity-Verlet-Integrator grundlegend umbauen) —
+  beide bleiben unten in der Ideen-Liste offen, keine halbgare Umsetzung.
+- **`no-cache`-Header für alle Nicht-API-Routen ergänzt** (`app.py`-Middleware),
+  weil beim Testen der Export-Funktion der altbekannte Cache-Fallstrick
+  (siehe 2026-09-19-Eintrag) erneut zuschlug — jetzt erzwingt jede
+  Frontend-Datei eine bedingte Anfrage (`If-Modified-Since`) statt
+  heuristisch lang gecacht zu werden. Wichtig für Niki: **selbst damit kann
+  ein once-cachter Browser-Tab noch die alte Version einer schon vorher
+  (ohne den Header) geladenen Datei behalten** — bei Verdacht auf eine
+  hängende alte Version hilft ein neuer Tab zuverlässiger als Strg+Shift+R
+  in einem schon offenen Tab (per echtem Test bestätigt, nicht nur
+  vermutet).
+
+**Phase 3 — Deployment-Vorbereitung, beide bekannten Blocker gelöst:**
+- **Docking läuft nicht mehr nur unter Windows.** `docking.py` löst
+  meeko-Skriptpfade jetzt über `sys.executable`s Verzeichnis auf (statt
+  hartkodiert `.venv/Scripts`) und probiert beim Aufruf `.exe` →
+  endungslos → `.py` (über `sys.executable` ausgeführt) — die genaue Form
+  unterscheidet sich pro Plattform und wurde erst am echten Deployment
+  entdeckt, nicht vorher angenommen (siehe Phase 4 unten). Für Vina selbst:
+  `backend/tools/vina.exe` bleibt der Windows-Weg, neu ist ein Fallback auf
+  das **pip-Paket `vina`** (echte manylinux-Wheels, anders als unter
+  Windows) über Vinas Python-Bindings, wenn die `.exe` fehlt.
+  `requirements.txt` installiert es nur auf Nicht-Windows
+  (`vina; sys_platform != "win32"`), damit Nikis lokale Windows-venv
+  unverändert bleibt.
+- **Boltz-2 sauber gated statt zu crashen.** Neue Route
+  `GET /api/fold-available` (`folding.BOLTZ_AVAILABLE`, prüft nur, ob
+  `.venv-boltz/Scripts/boltz.exe` existiert) — das Frontend fragt das beim
+  Laden ab und graut Eingabefeld/Buttons im Boltz-2-Bereich aus, mit
+  erklärendem Hinweistext, statt dass ein Vorhersage-Versuch auf einem
+  GPU-losen Host in einer kryptischen Fehlermeldung endet. Genau Option (a)
+  aus Nikis Vorgabe — ein CPU-Fallback (Option b) wäre für ein
+  AlphaFold3-artiges Modell auf einem 512-MB-Free-Tier ohnehin unrealistisch
+  gewesen.
+- **Dockerfile + `.dockerignore` + `render.yaml`** (Render-Blueprint) neu.
+  `python:3.12-slim`-Basis, `libgomp1` für scipy/vina, installiert
+  `requirements.txt` direkt ins System-Python (kein venv im Container
+  nötig). `render.yaml` deklariert den Web-Service inkl. optionalem
+  `ANTHROPIC_API_KEY`-Feld, damit die Render-Oberfläche den Service beim
+  Verbinden automatisch mit den richtigen Einstellungen anlegt.
+
+**Phase 4 — tatsächlich deployt, mit drei echten Stolpersteinen, alle vor
+Ort am lebenden Deployment gefunden und gelöst (nicht vorab erraten):**
+
+1. **Konto-Erstellung ist mir laut meinen eigenen Sicherheitsregeln
+   verboten**, auch mit Nikis vorheriger pauschaler Erlaubnis — das habe ich
+   offen angehalten und Niki gebeten, das Render-Konto selbst anzulegen
+   (mit seinem Google-Account). Alles danach (Blueprint verbinden,
+   Environment-Variable, Deploys auslösen) habe ich übernommen.
+2. **Öffentliches GitHub-Repo direkt per URL verbunden** (`select-repo` →
+   "Public Git Repository"-Feld), nicht über die GitHub-App-OAuth-Verbindung
+   — vermeidet eine OAuth-Berechtigungsanfrage an Niki, kostet aber
+   Auto-Deploy bei zukünftigen Pushes (Render deployt dann nicht mehr
+   automatisch, siehe "Zum Wiedereinsteigen" unten für den manuellen
+   Redeploy-Weg). Falls Niki Auto-Deploy will: im Render-Dashboard unter
+   "Connect" den GitHub-Account verbinden (braucht seine OAuth-Freigabe,
+   deshalb nicht von mir selbst gemacht).
+3. **Stolperstein 1 — Build lief safort durch, inkl. `vina-1.2.7` aus
+   PyPI** (bestätigt: echte manylinux-Wheels für alle Kern-Pakete,
+   `rdkit`/`meeko`/`gemmi`/`scipy`/`vina` installierten sich alle sauber).
+   Der erste `/api/dock`-Testaufruf über die echte, öffentliche Seite schlug
+   aber mit `FileNotFoundError: /usr/local/bin/mk_prepare_receptor` fehl
+   (500). **Ursache: meekos Konsolen-Skripte liegen unter Linux als
+   `mk_prepare_receptor.py`-Datei mit Shebang, nicht als endungsloser
+   Launcher wie erwartet** (unter Windows sind es `.exe`-Launcher ohne
+   `.py`) — das war eine plattformspezifische Eigenheit von meekos
+   0.8.0-Distribution, die sich vorher nicht ohne einen echten Linux-Host
+   prüfen ließ (kein Docker lokal verfügbar). Gelöst mit `_tool_cmd()`
+   (`docking.py`): probiert `.exe` → endungslos → `.py` (über
+   `sys.executable` aufgerufen, verlässt sich nicht auf Ausführungsrechte/
+   Shebang). Ohne Shell-Zugriff auf den Free-Tier-Container (Render Shell
+   ist ein bezahltes Feature) wurde das über eine temporär eingebaute
+   Diagnose in `_run()` gefunden (listet den Skript-Ordner bei einem
+   `FileNotFoundError` auf) statt zu raten.
+4. **Stolperstein 2 — danach ein `502 Bad Gateway`, ohne jeden
+   Python-Traceback im Log:** der Uvicorn-Prozess wurde beim ersten echten
+   Docking-Versuch (3PTB + Benzamidin) kommentarlos neu gestartet
+   ("Started server process" erscheint erneut, keine Fehlermeldung dazwischen)
+   — das klassische Muster eines OOM-Kills, nicht eines Python-Fehlers.
+   Render Free-Tier hat ein **512-MB-RAM-Limit** (im Dashboard unter
+   Metrics bestätigt). Ursache vermutet und behoben: Vinas Python-Bindings
+   nutzen standardmäßig `cpu=0` (alle erkannten Kerne) — in einem
+   Container mit CPU-Kontingent meldet `/proc` oft die volle Kernzahl des
+   Host-Rechners, wodurch Vina so viele parallele Suchthreads (jeder mit
+   eigenen Gitter-Puffern) startet, wie **gemeldete**, nicht tatsächlich
+   verfügbare Kerne da sind. `Vina(sf_name="vina", cpu=1, ...)` erzwingt
+   einen einzigen Thread. **Nach dem Fix: `200 OK`, echtes Docking-Ergebnis,
+   Protein-Röhre + Ligand + Suchbox sichtbar im Browser, exakt wie lokal.**
+   Nicht per Shell-Zugriff bestätigt (den gibt es auf dem Free-Tier nicht),
+   aber die Korrelation (Fix eingespielt → sofort funktionierend, keine
+   weiteren Restarts) ist deutlich.
+5. **Alle anderen Endpunkte gegen die echte, öffentliche URL durchgetestet:**
+   `/api/resolve`, `/api/equation`, `/api/chemical-space`, `/api/reactions`,
+   `/api/dynamics`, `/api/peptide`, `/api/pdb-ligand` — alle `200 OK`.
+   `/api/fold-available` liefert korrekt `false` (kein `.venv-boltz` im
+   Container), Frontend graut den Boltz-2-Bereich sichtbar aus, mit dem
+   erklärenden Hinweistext. **Bekannte Grenze, offen benannt:** `/api/peptide`
+   und `/api/dynamics` liefen deutlich langsamer als lokal (mehrere Sekunden
+   statt "quasi sofort") — Render Free-Tier gibt nur einen kleinen,
+   geteilten CPU-Anteil, das ist erwartbar und für eine Demo/Portfolio-Seite
+   hinnehmbar, aber falls Niki das stört: eine bezahlte Instanz mit mehr
+   CPU wäre der Hebel, nicht weitere Code-Änderungen.
+6. **Weitere bekannte Free-Tier-Eigenheit, nicht behoben, weil es genau der
+   Kompromiss des kostenlosen Tiers ist:** die Instanz fährt nach
+   Inaktivität herunter, ein erster Aufruf danach kann 50+ Sekunden dauern
+   (Render zeigt diesen Hinweis selbst im Dashboard an).
+
+**Phase 5 — dieser Eintrag + README.** `README.md` hat jetzt den Live-Link
+ganz oben (Portfolio-tauglich für die VWA, wie gewünscht). Alle
+Zwischenstände wurden committet und gepusht (5 Commits diesen Durchlauf:
+Haupt-Feature-Bündel, Render-Blueprint, Diagnose-Hilfe, meeko-Fix,
+Vina-CPU-Fix) — `git log` zeigt den vollen Weg inklusive der drei
+Stolpersteine, falls das später nochmal relevant wird.
+
 ## 2026-09-20 (autonomer Durchlauf, ~1,5 Std.): Ausbaustufe — echte Protein-Faltung mit Boltz-2
 
 Niki war ~1,5 Std. weg und hat eine neue, größere Ausbaustufe vorgegeben:
@@ -1287,6 +1462,19 @@ Browser, im dunklen "Iron-Man-HUD"-Look.
 
 ## Zum Wiedereinsteigen
 
+**Das Projekt ist jetzt live: https://molecule-viewer.onrender.com** (Render
+Free-Tier, Deployment-Details siehe Eintrag ganz oben). Render-Dashboard:
+einloggen mit Nikis Google-Account, Service heißt `molecule-viewer`,
+Service-ID `srv-dantbfjtqb8s73d39tfg`.
+
+**Neuen Stand veröffentlichen (kein Auto-Deploy, siehe Eintrag oben Punkt
+2):** `git push origin main` reicht NICHT allein — im Render-Dashboard
+zusätzlich "Manual Deploy" → "Deploy latest commit" klicken (Chrome-Browser
+mit Nikis eingeloggter Render-Session, gleiches Muster wie beim GitHub-Repo).
+Build-Logs direkt im Dashboard unter "Logs", Shell-Zugriff gibt es auf dem
+Free-Tier nicht (nur per Upgrade).
+
+**Lokal weiterentwickeln, wie gewohnt:**
 ```bash
 cd "Claude Code Projekte/molecule-viewer/backend"
 ./.venv/Scripts/python.exe -m uvicorn app:app --reload --port 8001
@@ -1386,19 +1574,23 @@ wartet weiter auf einen `ANTHROPIC_API_KEY` von Niki — `backend/.env.example`
 nach `backend/.env` kopieren, echten Key eintragen, Server neu starten.
 Alles andere läuft schon ohne das.
 
-**Nächste Schritte sind komplett offen** — es gibt keine vereinbarte
-Ausbaustufe mehr, die noch aussteht. Ideen für kleinere Lücken/Politur,
-falls gefragt: weitere Reaktionen zu `backend/reactions.py` ergänzen
-(Rezept siehe oben), die Formel-Mehrdeutigkeits-Heuristik verbessern
-(Fallstrick 1 unten), beim Protein-Docking die Ladungszustände des
-Liganden vor dem Docken berücksichtigen (siehe Einschränkung oben), bei
-der Molekulardynamik echte Bindungslängen-Constraints (SHAKE/RATTLE)
-einbauen (siehe Einschränkung oben), die Atom-Zuordnung im Gleichungslöser
+**Projekt ist seit dem 2026-09-20-Durchlauf (später) live deployt, siehe
+Eintrag ganz oben: https://molecule-viewer.onrender.com.** Formel-
+Mehrdeutigkeits-Heuristik, PubChem-Retry und das Export/Screenshot-Feature
+sind ebenfalls erledigt (gleicher Eintrag). **Nächste Schritte sind
+komplett offen** — es gibt keine vereinbarte Ausbaustufe mehr, die noch
+aussteht. Ideen für kleinere Lücken/Politur, falls gefragt: weitere
+Reaktionen zu `backend/reactions.py` ergänzen (Rezept siehe oben), beim
+Protein-Docking die Ladungszustände des Liganden vor dem Docken
+berücksichtigen (bewusst zurückgestellt, siehe Einschränkung oben), bei der
+Molekulardynamik echte Bindungslängen-Constraints (SHAKE/RATTLE) einbauen
+(ebenfalls bewusst zurückgestellt), die Atom-Zuordnung im Gleichungslöser
 verbessern (z. B. per lokaler Bindungsumgebung statt reinem Abstand vor-
 matchen, siehe Eintrag vom 2026-09-19), weitere Peptid-Wirkstoffe/Klein-
 Molekül-Karten zur Bibliothek ergänzen (z. B. per `hetero_code` oder
 `chain_ids`, siehe die beiden 2026-09-19-Einträge oben), die kuratierte
-Peptid-Namensliste in `peptide.py` erweitern, oder ein
-Export/Screenshot-Feature
-und ein echtes Deployment (Render/Fly.io, braucht Linux-Vina-Build) —
-aber erst wieder anfangen, wenn Niki eine neue Richtung vorgibt.
+Peptid-Namensliste in `peptide.py` erweitern, GitHub-Auto-Deploy in Render
+verbinden (braucht Nikis OAuth-Freigabe, siehe Deployment-Eintrag), oder
+einen eigenen `ANTHROPIC_API_KEY` im Render-Dashboard eintragen, damit die
+KI-Erklärung auch auf der öffentlichen Instanz läuft — aber erst wieder
+anfangen, wenn Niki eine neue Richtung vorgibt.
