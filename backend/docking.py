@@ -72,7 +72,20 @@ class DockingError(Exception):
 
 
 def _run(cmd: list[str], step: str) -> subprocess.CompletedProcess:
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True)
+    except FileNotFoundError as exc:
+        # Diagnose-Hilfe für die Deployment-Umgebung, wo kein Shell-Zugriff möglich ist
+        # (Render Free-Tier) -- zeigt, wo genau gesucht wurde und was tatsächlich im
+        # Skript-Ordner liegt, statt nur "Datei fehlt" ohne weiteren Anhaltspunkt.
+        try:
+            listing = sorted(p.name for p in _SCRIPTS_DIR.glob("mk_*"))
+        except OSError:
+            listing = ["<Ordner nicht lesbar>"]
+        raise DockingError(
+            f"{step} fehlgeschlagen: {cmd[0]} nicht gefunden. sys.executable={sys.executable}, "
+            f"_SCRIPTS_DIR={_SCRIPTS_DIR}, gefundene mk_*-Dateien dort: {listing}"
+        ) from exc
     if result.returncode != 0:
         detail = (result.stderr or result.stdout).strip()
         raise DockingError(f"{step} fehlgeschlagen: {detail[-800:]}")
