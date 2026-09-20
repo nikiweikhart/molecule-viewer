@@ -417,6 +417,18 @@ button:hover {
   height: 100%;
 }
 
+.export-button {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 2;
+  padding: 6px 12px;
+  font-size: 11px;
+  font-family: "JetBrains Mono", monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 .result-names {
   position: absolute;
   left: 20px;

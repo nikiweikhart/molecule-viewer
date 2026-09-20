@@ -542,6 +542,14 @@ export function createViewer(container) {
     playReaction,
     setDockingResult,
     playTrajectory,
+    captureScreenshot() {
+      // Kein preserveDrawingBuffer auf dem Renderer (siehe docs/stand.md -- das
+      // hatte gl.readPixels() von außen schon einmal unzuverlässig gemacht) --
+      // stattdessen hier synchron neu rendern und sofort danach toDataURL()
+      // aufrufen, bevor der Browser den Drawing-Buffer zwischen Frames leert.
+      renderer.render(scene, camera);
+      return renderer.domElement.toDataURL("image/png");
+    },
     resize() {
       resize();
       if (moleculeGroup) fitCameraToObject(moleculeGroup);

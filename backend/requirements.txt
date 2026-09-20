@@ -8,3 +8,7 @@ numpy
 meeko
 scipy
 gemmi
+# Nur unter Linux/macOS installiert -- hat dort echte vorgebaute Wheels (manylinux),
+# unter Windows nicht (siehe docs/stand.md, docking.py). Dort wird stattdessen die
+# offizielle vina.exe-Binary unter backend/tools/ verwendet (Subprocess-Aufruf).
+vina; sys_platform != "win32"

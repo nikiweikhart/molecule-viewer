@@ -34,7 +34,7 @@
       <input
         id="query-input"
         type="text"
-        placeholder="Name, Formel oder SMILES — z. B. Aspirin, C6H12O6, CCO"
+        placeholder="Name, Markenname, Formel oder SMILES — z. B. Mexalen, Aspirin, C6H12O6, CCO"
         autocomplete="off"
       />
       <input
@@ -66,6 +66,7 @@
     </div>
     <div class="viewer-frame">
       <div id="reaction-viewer" class="viewer"></div>
+      <button type="button" id="reaction-export" class="ghost-button export-button">PNG speichern</button>
     </div>
 
     <div class="section-label">Gleichungslöser</div>
@@ -81,6 +82,7 @@
     </div>
     <div class="viewer-frame">
       <div id="equation-viewer" class="viewer"></div>
+      <button type="button" id="equation-export" class="ghost-button export-button">PNG speichern</button>
     </div>
     <div id="equation-info" class="chemspace-info" hidden></div>
 
@@ -89,7 +91,7 @@
       <textarea
         id="chemspace-input"
         rows="4"
-        placeholder="Ein Molekül pro Zeile — Name, Formel oder SMILES"
+        placeholder="Ein Molekül pro Zeile — Name, Markenname, Formel oder SMILES"
       ></textarea>
       <div class="chemspace-buttons">
         <button type="button" id="chemspace-example" class="ghost-button">Beispiel-Set laden</button>
@@ -112,7 +114,7 @@
       <input
         id="docking-ligand-input"
         type="text"
-        placeholder="Ligand — Name, Formel oder SMILES"
+        placeholder="Ligand — Name, Markenname, Formel oder SMILES"
         autocomplete="off"
       />
       <button type="button" id="docking-example" class="ghost-button">Beispiel laden</button>
@@ -120,6 +122,7 @@
     </div>
     <div class="viewer-frame">
       <div id="docking-viewer" class="viewer"></div>
+      <button type="button" id="docking-export" class="ghost-button export-button">PNG speichern</button>
     </div>
     <div id="docking-info" class="chemspace-info" hidden></div>
 
@@ -128,7 +131,7 @@
       <input
         id="dynamics-input"
         type="text"
-        placeholder="Name, Formel oder SMILES — z. B. caffeine"
+        placeholder="Name, Markenname, Formel oder SMILES — z. B. caffeine, Mexalen"
         autocomplete="off"
       />
       <button type="button" id="dynamics-example" class="ghost-button">Beispiel laden</button>
@@ -136,14 +139,39 @@
     </div>
     <div class="viewer-frame">
       <div id="dynamics-viewer" class="viewer"></div>
+      <button type="button" id="dynamics-export" class="ghost-button export-button">PNG speichern</button>
     </div>
     <div id="dynamics-info" class="chemspace-info" hidden></div>
+
+    <div class="section-label">Protein-Struktur-Vorhersage (Boltz-2)</div>
+    <div class="chemspace-info" style="margin-bottom: 10px">
+      Echte ML-basierte Faltungsvorhersage (Boltz-2, AlphaFold3-artige Architektur) --
+      im Unterschied zur reinen Kraftfeld-Näherung oben unter "Kleine Peptide".
+      Dauert deutlich länger (typisch mehrere Minuten, siehe Hinweistext nach der
+      Berechnung) und braucht Internet für den MSA-Server.
+    </div>
+    <div class="docking-controls">
+      <input
+        id="folding-input"
+        type="text"
+        placeholder="Sequenz (Ein-Buchstaben-Code) oder Name — z. B. Oxytocin"
+        autocomplete="off"
+      />
+      <button type="button" id="folding-example" class="ghost-button">Beispiel laden</button>
+      <button type="button" id="folding-run">Vorhersagen</button>
+    </div>
+    <div class="viewer-frame">
+      <div id="folding-viewer" class="viewer"></div>
+      <button type="button" id="folding-export" class="ghost-button export-button">PNG speichern</button>
+    </div>
+    <div id="folding-info" class="chemspace-info" hidden></div>
   </div>
 
   <template id="card-template">
     <div class="card">
       <div class="viewer-frame">
         <div class="viewer"></div>
+        <button type="button" class="ghost-button export-button">PNG speichern</button>
         <div class="result-names" hidden>
           <div class="result-common-name"></div>
           <div class="result-iupac-name"></div>

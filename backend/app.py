@@ -11,12 +11,28 @@ from docking import DockingError, dock, pdb_ligand
 from dynamics import run_md
 from equation import EquationError, build_equation_reaction
 from explain import explain
+from folding import BOLTZ_AVAILABLE, FoldingError, build_folding
 from peptide import PeptideError, build_peptide
 from reactions import get_reaction, list_reactions
 
 app = FastAPI()
 
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
+
+
+@app.middleware("http")
+async def no_cache_static_files(request, call_next):
+    # StaticFiles setzt sonst gar keinen Cache-Control-Header -- Browser dürfen
+    # dann nach eigenem Ermessen aggressiv cachen (siehe docs/stand.md, mehrfach
+    # als Fallstrick aufgetreten: alte app.js/style.css bleiben auch nach einem
+    # Server-Neustart oder neuem Tab hängen). "no-cache" erzwingt eine bedingte
+    # Anfrage (If-Modified-Since) bei jedem Laden -- kein Neu-Download, wenn die
+    # Datei unverändert ist, aber Änderungen kommen sofort an statt erst nach
+    # einem harten Reload.
+    response = await call_next(request)
+    if request.url.path == "/" or not request.url.path.startswith("/api"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
 
 
 class ResolveRequest(BaseModel):
@@ -53,6 +69,11 @@ class EquationRequest(BaseModel):
 
 
 class PeptideRequest(BaseModel):
+    name: str | None = None
+    sequence: str | None = None
+
+
+class FoldingRequest(BaseModel):
     name: str | None = None
     sequence: str | None = None
 
@@ -137,6 +158,22 @@ def api_peptide(req: PeptideRequest):
         return build_peptide(req.name, req.sequence)
     except PeptideError as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
+
+
+@app.post("/api/fold")
+def api_fold(req: FoldingRequest):
+    try:
+        return build_folding(req.name, req.sequence)
+    except FoldingError as e:
+        return JSONResponse(status_code=400, content={"error": str(e)})
+
+
+@app.get("/api/fold-available")
+def api_fold_available():
+    # Lässt das Frontend den Boltz-2-Bereich proaktiv ausgrauen, wenn diese Instanz
+    # (z.B. das öffentliche Deployment ohne lokale GPU) die Vorhersage gar nicht
+    # ausführen kann -- siehe folding.BOLTZ_AVAILABLE.
+    return {"available": BOLTZ_AVAILABLE}
 
 
 app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")

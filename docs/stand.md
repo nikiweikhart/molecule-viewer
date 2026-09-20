@@ -1,5 +1,288 @@
 # Stand: Molekül-Viewer
 
+## 2026-09-20 (autonomer Durchlauf, ~1,5 Std.): Ausbaustufe — echte Protein-Faltung mit Boltz-2
+
+Niki war ~1,5 Std. weg und hat eine neue, größere Ausbaustufe vorgegeben:
+echte ML-basierte Struktur-Vorhersage (Boltz-2, AlphaFold3-artige Architektur)
+als Ergänzung zur reinen RDKit-Kraftfeld-Näherung in `peptide.py`. Bauplan kam
+als vollständiger Prompt mit vier Phasen (Machbarkeits-Check, Backend,
+Frontend, Doku) und expliziter Hardware-Einordnung (RX 7900 XTX, ROCm 10.0
+Windows-Preview) — bei normalen Umsetzungsentscheidungen selbst entschieden,
+nicht gewartet. **Ergebnis: funktioniert, inklusive echter GPU-Beschleunigung
+auf der AMD-Karte — mit drei echten Stolpersteinen unterwegs, die alle
+gelöst wurden.**
+
+**Phase 0 — Machbarkeits-Check (der wichtigste Teil, hat sich gelohnt):**
+
+1. **Python-Versionskonflikt zuerst gefunden, bevor irgendwas installiert
+   wurde:** Boltz-2 braucht `>=3.10,<3.13` (per Recherche bestätigt), auf
+   diesem Rechner war nur Python 3.14 installiert (auch `backend/.venv`
+   läuft auf 3.14) — und PyTorchs eigene 3.14-Unterstützung hat laut
+   offenen GitHub-Issues (`pytorch/pytorch#169929`, `ROCm/TheRock#2640`)
+   ohnehin noch keine GPU-Wheels, nur CPU. **Lösung: Python 3.12 separat
+   installiert** (`winget install Python.Python.3.12`, koexistiert
+   problemlos neben 3.14 über den `py`-Launcher) und eine **komplett
+   eigene venv `backend/.venv-boltz`** angelegt — `backend/.venv` (die
+   normale FastAPI-App) bleibt unangetastet auf 3.14. `folding.py` läuft
+   selbst in `.venv/Scripts/python.exe` (Python 3.14, wie der Rest der
+   App), ruft Boltz-2 aber als externen Prozess in `.venv-boltz` auf —
+   gleiches Muster wie `vina.exe` in `docking.py`, nur mit einer ganzen
+   Python-Umgebung statt einer einzelnen `.exe`.
+2. **ROCm-PyTorch für Windows tatsächlich installierbar, genau wie im Prompt
+   vermutet.** AMDs aktuelle Doku (`rocm.docs.amd.com/.../pytorch/install.html`)
+   nennt für die RX 7900 XTX (gfx1100) unter Windows Python 3.11–3.14 und
+   einen fertigen Install-Befehl gegen einen eigenen Paket-Index
+   (`repo.amd.com/rocm/whl-multi-arch/`). Installiert:
+   `torch==2.12.0+rocm7.14.1` (mit `[device-gfx1100]`-Extra) +
+   `torchvision`/`torchaudio` derselben Serie. **Download ca. 1,5 GB**
+   (`rocm-sdk-core` allein 758 MB). Danach bestätigt:
+   `torch.cuda.is_available() == True`, `torch.cuda.get_device_name(0)`
+   → `"AMD Radeon RX 7900 XTX"` — ROCms CUDA-Kompatibilitätsschicht macht
+   die AMD-Karte für PyTorch als ganz normales `cuda`-Gerät sichtbar.
+3. **`pip install boltz` (ohne `[cuda]`-Extra, wie geplant) lief sauber** in
+   `.venv-boltz` (Boltz **2.2.1**, zieht u.a. `pytorch-lightning`,
+   `biopython`, `hydra-core`, ein eigenes `rdkit` mit — degradiert dabei
+   `numpy` von 2.4.4 auf 1.26.4, aber `torch`+`numpy`+`boltz` importieren
+   danach weiterhin gemeinsam ohne Konflikt, geprüft).
+4. **Testlauf mit Oxytocin (9 AS) — drei echte Probleme unterwegs, alle
+   gelöst, siehe auch die Kurzfassung ganz unten in "Bekannte Grenzen":**
+   - **Stolperstein 1 — der erste Versuch lief in mein eigenes
+     600s-Zeitbudget hinein, aber nicht weil die Berechnung selbst
+     lange dauerte:** Boltz-2 lädt seine Gewichte (`boltz2_conf.ckpt`,
+     `boltz2_aff.ckpt`, `mols.tar` — zusammen **ca. 5,8 GB**) beim
+     allerersten Aufruf automatisch nach `C:\Users\<user>\.boltz\`. Das
+     hat beim ersten Testlauf länger als 600s gedauert und wurde vom
+     Timeout abgewürgt.
+   - **Stolperstein 2 — dadurch eine ECHTE, nicht offensichtliche Falle:
+     der abgewürgte Download hinterließ eine unvollständige
+     `boltz2_conf.ckpt` (745 MB statt der fertigen 2,29 GB), und Boltz-2
+     prüft beim nächsten Start nur "existiert die Datei?", nicht ob sie
+     vollständig/korrekt ist.** Der nächste Versuch lief prompt in einen
+     `RuntimeError: PytorchStreamReader failed reading zip archive`
+     beim Laden des Checkpoints. **Lösung:** die kaputte Datei gezielt
+     gelöscht (`rm ~/.boltz/boltz2_conf.ckpt`), sauber neu heruntergeladen
+     -- **wichtig für Niki, falls das nochmal passiert: bei einem
+     abgebrochenen/getimeouteten Boltz-Lauf immer die zuletzt
+     wachsende Datei in `~/.boltz/` löschen, bevor man es nochmal
+     versucht, nicht einfach neu starten.**
+   - **Stolperstein 3 — danach ein echter Kompatibilitäts-Fund:** Boltz-2
+     nutzt standardmäßig NVIDIAs `cuequivariance`-Bibliothek für schnellere
+     Dreiecks-Multiplikations-Kernel — die existiert nur für CUDA, nicht
+     für ROCm, und der erste GPU-Versuch brach mit
+     `ModuleNotFoundError: No module named 'cuequivariance_torch'` mitten
+     in der Vorhersage ab (Checkpoint war da schon korrekt geladen, GPU
+     korrekt erkannt: "You are using a CUDA device ('AMD Radeon RX 7900
+     XTX')"). **Lösung:** Boltz-2 hat dafür extra ein Flag,
+     `--no_kernels` (laut eigener Doku "disables cuequivariance library
+     for older GPUs, trades performance for compatibility") — damit lief
+     der Testlauf durch. Jetzt fest in `folding.py`s Boltz-Aufruf
+     eingebaut, nicht optional.
+   - **Mit allen drei Fixes: Oxytocin (9 AS) komplett in 47s** (inkl.
+     Python-Subprozess-Start, echtem MSA-Server-Aufruf an
+     `api.colabfold.com` [~1-10s], GPU-Inferenz [~8s laut Boltz' eigenem
+     Fortschrittsbalken], CIF→PDB-Konvertierung). Konfidenzwerte real und
+     plausibel: `complex_plddt` 0.84-0.88, `confidence_score` 0.70-0.74,
+     `ptm` niedrig (~0.13-0.17 — für ein derart kurzes, unstrukturiertes
+     Peptid ohne festes Fold plausibel, pTM misst globale Faltähnlichkeit
+     und ist bei 9 Resten kaum aussagekräftig).
+5. **Zusätzlich, aus der bekannten "RDNA3 + PyTorch<2.14"-Performance-Notiz
+   in AMDs eigener Doku:** `TORCH_BLAS_PREFER_HIPBLASLT=1` wird jetzt als
+   Umgebungsvariable für den Boltz-Subprozess gesetzt (`folding.py`,
+   `_run_boltz()`) — AMDs Empfehlung gegen "lower-than-expected
+   performance" bei dieser PyTorch/ROCm-Kombination.
+
+**Phase 1 — Backend (`backend/folding.py`, neue Datei, analog zu
+`peptide.py`/`docking.py` aufgebaut):**
+- `build_folding(name?, sequence?)` -- gleiche Namens-/Sequenz-Auflösung wie
+  `peptide.py` (dieselbe kuratierte Kurzliste: Oxytocin, Vasopressin,
+  Met-/Leu-Enkephalin, plus freie Sequenzeingabe), aber **kein** RDKit-Mol
+  aus der Sequenz gebaut -- die 3D-Koordinaten kommen komplett aus Boltz-2s
+  Vorhersage.
+- Schreibt eine minimale FASTA (`>A|protein\n<SEQUENZ>`, bewusst **ohne**
+  `|empty` im Header -- das würde die MSA für diese Kette abschalten, hier
+  soll `--use_msa_server` sie echt berechnen), ruft
+  `.venv-boltz/Scripts/boltz.exe predict` per `subprocess` auf (`--use_msa_server
+  --recycling_steps 3 --diffusion_samples 1 --no_kernels`, `TIMEOUT_SECONDS =
+  600` fürs eigentliche Zeitbudget je Anfrage -- der einmalige
+  Gewichts-Download ist davon *nicht* mehr betroffen, da die Gewichte durch
+  Phase 0 jetzt dauerhaft in `~/.boltz/` liegen).
+- Ergebnis-Dateien werden per `Path.rglob()` gesucht statt über einen starr
+  angenommenen Ordnerpfad (Boltz-Ordnernamen können je nach Version
+  variieren) -- CIF-Struktur + `confidence_*.json` werden so gefunden, auch
+  wenn sich das genaue Verzeichnis-Layout mal ändert.
+- **CIF → PDB-Block per `gemmi`** (war als ungenutzte `meeko`-Abhängigkeit
+  schon in `backend/.venv`, siehe frühere Einträge), dann exakt das gleiche
+  Muster wie bei PDB-Liganden in `docking.py`: `Chem.MolFromPDBBlock(...,
+  proximityBonding=True)` für die Bindungserkennung (Boltz-2 selbst liefert
+  keine Bindungsliste, nur Atompositionen), **keine** Wasserstoffe ergänzt
+  (reale vorhergesagte Geometrie, keine erfundenen H-Positionen), Fakten-Panel
+  entsprechend nur Summenformel+Molmasse (die anderen fünf Felder "–") --
+  `docking._hill_formula`/`docking._atoms_molweight` direkt wiederverwendet
+  statt dupliziert.
+- Konfidenzwerte (`confidence_score`, `complex_plddt`, `ptm` aus Boltz-2s
+  `confidence_*.json`) werden in die `note` eingebaut (z.B. "pLDDT (Komplex)
+  87/100, pTM 0.15, Gesamt-Konfidenz 0.73") und zusätzlich als eigenes
+  `confidence`-Feld in der Antwort mitgegeben -- wichtig, um "echte
+  Vorhersage mit Konfidenz" von "geraten" zu unterscheiden, wie im Auftrag
+  gefordert.
+- `MAX_RESIDUES = 50` -- **bewusst konservativ und NICHT empirisch
+  verifiziert** (nur mit 9 Resten getestet, siehe "Bekannte Grenzen" unten).
+- Route `POST /api/fold {name?, sequence?}` in `app.py`, exakt gleiches
+  Antwortformat wie `/api/resolve`/`/api/peptide` -- am Frontend musste dafür
+  nichts Neues gebaut werden, nur die neue Sektion selbst.
+- **Bewusst kein neuer `pytest`-Test in `test_api.py`:** ein einzelner
+  Boltz-2-Aufruf dauert (nach dem einmaligen Gewichts-Download) ~30-60s und
+  braucht eine Internetverbindung zum MSA-Server -- das würde die sonst
+  sekundenschnelle Test-Suite drastisch verlangsamen. Stattdessen manuell
+  getestet: `python folding.py` (eigener `__main__`-Testblock, analog zu
+  `peptide.py`) und ein echter Request über den laufenden Server (siehe
+  Phase 2).
+
+**Phase 2 — Frontend (`frontend/index.html`, `app.js`):**
+- Neue Sektion "Protein-Struktur-Vorhersage (Boltz-2)" ganz unten, nach dem
+  Muster von Molekulardynamik/Docking (`docking-controls`-Klasse
+  wiederverwendet, kein neues CSS nötig) -- Eingabefeld (erkennt automatisch,
+  ob Sequenz oder kuratierter Name eingegeben wurde, per Regex auf die 20
+  Aminosäure-Buchstaben), "Beispiel laden" (füllt "Oxytocin"),
+  "Vorhersagen"-Button.
+- Erklärender Absatz direkt unter der Sektions-Überschrift, der den
+  Unterschied zur RDKit-Näherung oben ("Kleine Peptide") und die deutlich
+  längere Wartezeit vorab benennt -- genau wie im Auftrag gefordert
+  ("deutlich sichtbare 'wird berechnet…'-Anzeige mit realistischer
+  Zeit-Erwartung"). Während der Berechnung: "Wird mit Boltz-2 berechnet …
+  das kann je nach Sequenzlänge und Hardware mehrere Minuten dauern."
+
+**Getestet, inklusive echter visueller Bestätigung (Nachtrag kurz nach dem
+autonomen Durchlauf, sobald das Browser-Pane wieder sichtbar war):**
+- **API/Daten-Ebene vollständig bestätigt, über den echten laufenden
+  Server:** `POST /api/fold {"name": "oxytocin"}` im Browser über die neue
+  UI ausgelöst → `200 OK`, `common_name` "oxytocin (Boltz-2-Vorhersage, 9
+  Reste)", 68 Atome/70 Bindungen, Summenformel `C43N11O12S2`, Konfidenz-Text
+  korrekt gerendert im Info-Feld, keine Konsolenfehler. Atomkoordinaten
+  direkt geprüft (per Skript aus dem echten CIF extrahiert) -- plausible
+  Werte im Å-Bereich, keine NaN/Ausreißer.
+- **3D-Rendering per echtem Screenshot bestätigt, sobald das Browser-Pane
+  sichtbar war:** kompakte, sichtbar gefaltete Peptidstruktur (Kugel-Stab,
+  Elemente korrekt eingefärbt) statt einer offenen Kette -- deutlich vom
+  Aussehen der RDKit-Näherung unterscheidbar. Im autonomen Durchlauf selbst
+  war das Pane ohne sichtbares Fenster, wodurch `requestAnimationFrame`
+  nachweislich gar nicht feuerte (bestätigt per Zähler-Test, betraf auch die
+  längst bewährte "Wasser"-Karte -- also ein reines Sichtbarkeits-Merkmal
+  des Panes, keine Regression durch diese Änderung). Ein direkter
+  `gl.readPixels()`-Check von außen war zusätzlich unzuverlässig (0 non-
+  schwarze Pixel gemeldet, obwohl der echte Screenshot danach das Molekül
+  korrekt zeigte) -- vermutlich Timing/Buffer-Clearing bei
+  `preserveDrawingBuffer: false`. **Für künftige Sichtprüfungen: echten
+  Screenshot nehmen, nicht `gl.readPixels()` von außen.**
+- Server läuft bereits (`uvicorn app:app --port 8001`, im Hintergrund
+  gestartet) -- `http://localhost:8001` direkt öffnen, keine weiteren
+  Schritte nötig.
+
+**Bekannte Grenzen, offen benannt (gleiche Linie wie beim Rest des
+Projekts):**
+- **`MAX_RESIDUES = 50` ist eine konservative Setzung, keine gemessene
+  Grenze** -- aus Zeitgründen (1,5-Std.-Fenster, ein Großteil davon ging in
+  Phase 0 drauf) wurde nur eine einzige, sehr kurze Sequenz (Oxytocin, 9 AS)
+  tatsächlich durchgerechnet. Wie sich die Laufzeit mit der Sequenzlänge
+  skaliert (Boltz-2s Aufwand wächst überproportional mit der Länge, wie bei
+  AlphaFold-artigen Modellen üblich) ist auf dieser Hardware **nicht**
+  empirisch geprüft. Vor produktivem Vertrauen in die 50-Reste-Grenze: eine
+  mittelgroße (~30-40 AS) und eine nahe an der Grenze liegende Sequenz einmal
+  testen und Zeit stoppen.
+- **ROCm-Nutzung bestätigt, aber nicht tiefenoptimiert:** `--no_kernels`
+  schaltet AMDs fehlende cuequivariance-Kernel ab -- das kostet Performance
+  gegenüber einer echten NVIDIA-Karte mit den optimierten Kerneln, ist aber
+  die einzige Möglichkeit, dass es auf dieser Hardware überhaupt läuft. Ob
+  `bfloat16`-AMP auf RDNA3 tatsächlich schneller ist als reines `float32`,
+  wurde nicht separat gemessen.
+- **MSA-Server-Abhängigkeit:** `--use_msa_server` schickt die Sequenz an den
+  öffentlichen `api.colabfold.com`-Dienst -- funktioniert nur mit
+  Internetverbindung, keine eigene Kontrolle über dessen Verfügbarkeit/
+  Rate-Limits. Für sehr kurze Peptide (wie die 9 AS von Oxytocin) liefert
+  eine MSA ohnehin kaum zusätzliches evolutionäres Signal -- der Nutzen
+  wächst mit der Sequenzlänge.
+- **Erster Aufruf auf einer neuen Maschine lädt ca. 5,8 GB** (einmalig, dann
+  dauerhaft unter `~/.boltz/` gecacht) -- das `TIMEOUT_SECONDS = 600`-Budget
+  in `folding.py` ist NICHT für diesen einmaligen Download ausgelegt (siehe
+  Stolperstein 1 oben). Falls Niki das Projekt auf einem anderen Rechner
+  aufsetzt: die Gewichte vorher einmal manuell/mit großzügigerem Timeout
+  herunterladen lassen, nicht direkt über die App-Route.
+- Keine Bindungsaffinitäts-Vorhersage, kein Multi-Ligand-Co-Folding -- wie
+  im Auftrag als Nicht-Ziel dieser Stufe festgelegt.
+
+## 2026-09-20: Eingabe vereinfacht — Markennamen statt Wirkstoffnamen
+
+Nikis Wunsch: im Haupt-Suchfeld (und überall sonst, wo `chem.resolve`/
+`chem._resolve_to_names` verwendet wird) sollen Nutzer:innen keinen
+wissenschaftlichen/generischen Wirkstoffnamen kennen müssen, sondern den
+Markennamen eingeben können, den sie tatsächlich kennen (z.B. "Mexalen" statt
+"Paracetamol"). Ausdrücklich außerhalb des Scopes: Ozempic/Semaglutid soll
+weiterhin **nicht** als 3D-Struktur im Hauptfeld funktionieren -- laut Niki
+"noch zu schwierig", siehe unten, wie das trotzdem sauber statt mit einem
+wirren Fehler abgefangen wird.
+
+**Neue Datei `backend/brand_names.py`**: `BRAND_TO_SUBSTANCE`, ein Dict von
+kleingeschriebenem Markennamen auf den Wirkstoffnamen, den PubChems
+Namenssuche sicher kennt. Aktuell ~20 Einträge, Schwerpunkt
+österreichische/deutsche OTC-Marken (Mexalen, Ben-u-ron, Voltaren, Nurofen,
+Novalgin, Buscopan, Thomapyrin) plus ein paar international bekannte (Xanax,
+Valium, Prozac, Ritalin, Viagra, Tylenol, Advil) und die GLP-1-/
+Insulin-Präparate (Ozempic, Wegovy, Mounjaro, Victoza, Trulicity, Lantus,
+...) -- Letztere werden zwar über den Markennamen gefunden, laufen aber
+bewusst in den neuen Fehlerfall unten statt in eine Struktur.
+
+**`backend/chem.py`, `_resolve_to_names()` erweitert**: neuer Schritt
+zwischen SMILES-Versuch und PubChem-Namenssuche -- Markenname (lowercase,
+getrimmt) in `BRAND_TO_SUBSTANCE` nachschlagen, bei Treffer den übersetzten
+Wirkstoffnamen statt der Rohangabe an PubChem schicken. `note` sagt dann z.B.
+„Mexalen" wurde als Markenname für Acetaminophen erkannt." -- nutzt das
+schon vorhandene `note`-Feld/UI-Element, keine Frontend-Logik-Änderung dafür
+nötig. Kein Treffer im Dict → Ablauf komplett wie vorher (viele
+internationale Marken kennt PubChems eigene Synonymliste ohnehin schon
+direkt, z.B. Aspirin).
+
+**Neuer Schutz `MAX_HEAVY_ATOMS = 150` in `_build_structure()`**: bricht mit
+klarer Fehlermeldung ab, statt ein `EmbedMolecule` auf einem riesigen
+Peptid/Protein zu versuchen (kann ewig laufen oder eine sinnlose Struktur
+liefern). Das ist der generelle Fall, der auch Ozempic (Semaglutid, großes
+modifiziertes Peptid) sauber abfängt, sobald es über den Markennamen bei
+PubChem gefunden wurde -- ohne dass Ozempic einzeln im Code speziell
+behandelt werden musste. Betrifft nur `chem._build_structure` -- der
+separate Peptid-Modus (`peptide.py`, nutzt `chem._compute_facts` direkt,
+eigenes Limit von 15 Resten) ist davon nicht berührt.
+
+**Generalisiert automatisch auf Docking- und MD-Eingabe**, weil `docking.py`
+(Ligand-Feld) und `dynamics.py` beide direkt `chem._resolve_to_names()`
+aufrufen -- keine Änderungen dort nötig.
+
+**Frontend (`frontend/index.html`)**: Placeholder-Texte in den Eingabefeldern,
+die über `chem.resolve`/`_resolve_to_names` laufen (Haupt-Suchfeld,
+Chemischer Raum, Docking-Ligand, Molekulardynamik) von "Name, Formel oder
+SMILES" auf "Name, Markenname, Formel oder SMILES" erweitert, mit Mexalen als
+Beispiel im Haupt- und MD-Feld -- signalisiert von vornherein, dass
+Markennamen funktionieren, ohne dass man es erst ausprobieren muss.
+
+**Backend-Tests ergänzt** (`backend/tests/test_api.py`, 3 neue): Mexalen →
+Paracetamol/Acetaminophen mit Markennamen-Hinweis im `note`-Feld,
+Groß-/Kleinschreibung ("mexalen"), Ozempic → 400 mit erklärender
+"zu groß"-Fehlermeldung.
+
+**Nicht selbst ausgeführt/getestet:** diese Änderung kam aus einer
+Cloud-Sitzung ohne Terminalzugriff auf diesem PC (nur Datei-Lesen/Schreiben
+über die Gerätebrücke) -- pytest lief hier nicht, der Browser-Test auch
+nicht. Vor dem nächsten "richtigen" Arbeiten an diesem Projekt:
+`cd backend && pytest` laufen lassen (v.a. die 3 neuen Tests -- die genauen
+PubChem-Titel/Synonyme für Mexalen/Ozempic wurden aus Wissen heraus
+angenommen, nicht live geprüft) und die Markennamen kurz im Browser
+ausprobieren.
+
+**Bekannte Grenzen, offen:** `BRAND_TO_SUBSTANCE` ist eine reine
+Handlisten-Lösung -- neue/exotische Marken (v.a. außerhalb AT/DE oder ganz
+neue Präparate) funktionieren nur, wenn PubChems eigene Synonymliste sie
+kennt oder jemand sie manuell in die Liste einträgt. Eine "richtige" Fuzzy-/
+Autocomplete-Lösung (z.B. PubChems Autocomplete-Endpunkt) wäre der nächste
+Schritt, falls das im Alltag zu oft nicht reicht.
+
 ## 2026-09-19 (noch später): Ausbaustufe — kleine Peptide per Sequenzeingabe
 
 Niki wollte die "mittlere Stufe" aus einer vorherigen Besprechung: kleine
@@ -1009,6 +1292,23 @@ cd "Claude Code Projekte/molecule-viewer/backend"
 ./.venv/Scripts/python.exe -m uvicorn app:app --reload --port 8001
 ```
 
+**Server läuft nach dem 2026-09-20-Durchlauf bereits im Hintergrund** (ohne
+`--reload`, PID siehe `netstat -ano | grep ":8001"` falls nötig) — vor einem
+Neustart kurz prüfen, ob das noch die gewünschte Instanz ist.
+
+**Neu seit der Boltz-2-Ausbaustufe:** für die Protein-Struktur-Vorhersage
+(`/api/fold`) gibt es eine zweite, komplett separate venv,
+`backend/.venv-boltz` (Python 3.12, nicht 3.14 wie `backend/.venv` --
+Boltz-2 braucht `<3.13`). Die läuft nicht automatisch mit, ist aber schon
+fertig eingerichtet (ROCm-PyTorch + Boltz 2.2.1, Gewichte bereits unter
+`~/.boltz/` gecacht, ca. 5,8 GB). `folding.py` findet sie automatisch über
+`BOLTZ_VENV`/`BOLTZ_BINARY` in seinem Modul-Kopf. Falls diese venv fehlt
+oder neu aufgesetzt werden muss, siehe den vollen Befehlsablauf im Eintrag
+vom 2026-09-20 oben (Phase 0) -- **wichtig: `--no_kernels` beim
+`boltz predict`-Aufruf nicht vergessen** (steht schon fest in
+`folding.py` eingebaut), sonst bricht jede Vorhersage auf der AMD-GPU mit
+`ModuleNotFoundError: cuequivariance_torch` ab.
+
 **Falls Port 8001 "Method Not Allowed" auf neuen Routen zurückgibt, obwohl
 der Code sie enthält:** ein alter Uvicorn-Prozess von einer früheren
 Sitzung hängt noch am Port (`netstat -ano | grep ":8001.*ABH"` zeigt dann
@@ -1049,9 +1349,13 @@ z. B. `N2 + H2 -> NH3` von Hand eintippen), beim "Chemischer Raum"-Bereich
 "Beispiel laden" (füllt `3PTB` + `benzamidine`) + "Docken" ausprobieren
 (dauert beim allerersten Mal am längsten, danach ist die Rezeptor-
 Vorbereitung für `3PTB` in `backend/pdb_cache/` gecacht und es geht
-schnell), und ganz unten bei "Molekulardynamik" "Beispiel laden" (füllt
+schnell), und bei "Molekulardynamik" "Beispiel laden" (füllt
 `caffeine`) + "Simulieren" — sollte nach ~1 Sekunde ein sichtbar
-wackelndes Molekül zeigen.
+wackelndes Molekül zeigen. **Ganz unten neu: "Protein-Struktur-Vorhersage
+(Boltz-2)"** — "Beispiel laden" (füllt "Oxytocin") + "Vorhersagen", dauert
+diesmal wirklich ~30-60s (echter GPU-Rechenlauf + MSA-Server-Aufruf, siehe
+Eintrag vom 2026-09-20 oben). 3D-Rendering per Screenshot bestätigt
+(kompakte, sichtbar gefaltete Peptidstruktur).
 
 Falls die venv fehlt oder kaputt ist: `python -m venv .venv` im `backend`-
 Ordner, dann `./.venv/Scripts/python.exe -m pip install -r requirements.txt`
@@ -1070,9 +1374,13 @@ Raum, Protein-Docking, Molekulardynamik), plus eine 10. (Gleichungslöser),
 eine 11., zweiteilige Ausbaustufe vom 2026-09-19 (autonomer Durchlauf):
 PDB-Liganden direkt anzeigen (`/api/pdb-ligand`) + Bibliothek-Bereich im
 Frontend, samt Folge-Ergänzung um Insulin an seinem Rezeptor (4OGA, per
-neuem `chain_ids`-Parameter), und eine 12.: kleine Peptide per
+neuem `chain_ids`-Parameter), eine 12.: kleine Peptide per
 Sequenzeingabe (`/api/peptide`, bis 15 Reste, mit Disulfidbrücken-Heuristik
-und energieärmster von mehreren Konformeren, siehe Eintrag ganz oben).**
+und energieärmster von mehreren Konformeren, siehe Eintrag ganz oben), und
+eine 13. (2026-09-20, autonomer Durchlauf): echte Protein-Struktur-
+Vorhersage mit Boltz-2 (`/api/fold`, GPU-beschleunigt über ROCm auf der RX
+7900 XTX, separate venv, siehe Eintrag ganz oben — 3D-Rendering per
+Screenshot bestätigt).**
 Einzige offene Lücke aus dem Kern: KI-Erklärtext (Ausbaustufe 5)
 wartet weiter auf einen `ANTHROPIC_API_KEY` von Niki — `backend/.env.example`
 nach `backend/.env` kopieren, echten Key eintragen, Server neu starten.

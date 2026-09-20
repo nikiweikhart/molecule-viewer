@@ -1,4 +1,5 @@
 .venv/
+.venv-boltz/
 __pycache__/
 *.pyc
 *.log

@@ -1,6 +1,14 @@
 import { createViewer } from "./viewer.js";
 import { createChemSpacePlot } from "./chemspace.js";
 
+function downloadScreenshot(viewer, filenameBase) {
+  const dataUrl = viewer.captureScreenshot();
+  const link = document.createElement("a");
+  link.href = dataUrl;
+  link.download = `${filenameBase}.png`;
+  link.click();
+}
+
 const FACT_DEFS = [
   { key: "formula", label: "Summenformel", unit: "" },
   { key: "molweight", label: "Molare Masse", unit: "g/mol" },
@@ -148,6 +156,12 @@ const dynamicsRunButton = document.getElementById("dynamics-run");
 const dynamicsViewerContainer = document.getElementById("dynamics-viewer");
 const dynamicsInfoEl = document.getElementById("dynamics-info");
 
+const foldingInput = document.getElementById("folding-input");
+const foldingExampleButton = document.getElementById("folding-example");
+const foldingRunButton = document.getElementById("folding-run");
+const foldingViewerContainer = document.getElementById("folding-viewer");
+const foldingInfoEl = document.getElementById("folding-info");
+
 let compareActive = false;
 let currentMode = "ball-stick";
 
@@ -169,6 +183,9 @@ function createSlot() {
 
   const viewerContainer = node.querySelector(".viewer");
   const viewer = createViewer(viewerContainer);
+
+  const exportButton = node.querySelector(".export-button");
+  exportButton.addEventListener("click", () => downloadScreenshot(viewer, "molekuel"));
 
   return {
     node,
@@ -485,6 +502,9 @@ modeRow.addEventListener("click", (event) => {
 });
 
 const reactionViewer = createViewer(reactionViewerContainer);
+document
+  .getElementById("reaction-export")
+  .addEventListener("click", () => downloadScreenshot(reactionViewer, "reaktion"));
 
 async function loadReactionList() {
   const response = await fetch("/api/reactions");
@@ -521,6 +541,9 @@ reactionPlayButton.addEventListener("click", async () => {
 loadReactionList();
 
 const equationViewer = createViewer(equationViewerContainer);
+document
+  .getElementById("equation-export")
+  .addEventListener("click", () => downloadScreenshot(equationViewer, "gleichung"));
 
 equationExampleButton.addEventListener("click", () => {
   equationInput.value = "CH4 + O2 -> CO2 + H2O";
@@ -648,6 +671,9 @@ chemspaceBuildButton.addEventListener("click", async () => {
 });
 
 const dockingViewer = createViewer(dockingViewerContainer);
+document
+  .getElementById("docking-export")
+  .addEventListener("click", () => downloadScreenshot(dockingViewer, "docking"));
 
 dockingExampleButton.addEventListener("click", () => {
   dockingPdbInput.value = "3PTB";
@@ -701,6 +727,9 @@ dockingDockButton.addEventListener("click", async () => {
 });
 
 const dynamicsViewer = createViewer(dynamicsViewerContainer);
+document
+  .getElementById("dynamics-export")
+  .addEventListener("click", () => downloadScreenshot(dynamicsViewer, "molekulardynamik"));
 
 dynamicsExampleButton.addEventListener("click", () => {
   dynamicsInput.value = "caffeine";
@@ -747,5 +776,85 @@ dynamicsRunButton.addEventListener("click", async () => {
     show(errorEl, err.message || "Unbekannter Fehler.");
   } finally {
     dynamicsRunButton.disabled = false;
+  }
+});
+
+const foldingViewer = createViewer(foldingViewerContainer);
+document
+  .getElementById("folding-export")
+  .addEventListener("click", () => downloadScreenshot(foldingViewer, "proteinfaltung"));
+
+foldingExampleButton.addEventListener("click", () => {
+  foldingInput.value = "Oxytocin";
+});
+
+// Boltz-2 braucht eine lokale GPU (siehe backend/folding.py) -- auf einem Hosting-Tier
+// ohne GPU (z.B. der öffentlichen Deployment-Instanz) proaktiv ausgrauen statt erst
+// nach einem fehlgeschlagenen Versuch zu erklären, warum es nicht geht.
+fetch("/api/fold-available")
+  .then((r) => r.json())
+  .then(({ available }) => {
+    if (available) return;
+    foldingInput.disabled = true;
+    foldingExampleButton.disabled = true;
+    foldingRunButton.disabled = true;
+    foldingInfoEl.hidden = false;
+    foldingInfoEl.className = "chemspace-info";
+    foldingInfoEl.textContent =
+      "Auf dieser öffentlichen Instanz nicht verfügbar -- Boltz-2 braucht eine lokale GPU " +
+      "und läuft nur auf Nikis eigenem Rechner.";
+  })
+  .catch(() => {
+    /* Verfügbarkeitscheck ist reine Komfort-Politur -- bei Fehlschlag bleibt der
+       Bereich einfach normal nutzbar, /api/fold selbst meldet den Fehler dann wie gehabt. */
+  });
+
+foldingRunButton.addEventListener("click", async () => {
+  const raw = foldingInput.value.trim();
+  if (!raw) {
+    show(errorEl, "Bitte eine Sequenz oder einen Namen eingeben.");
+    return;
+  }
+  // Sequenz erkannt: nur Buchstaben aus den 20 Standard-Aminosäure-Codes, min. 2 Zeichen.
+  const isSequence = /^[ACDEFGHIKLMNPQRSTVWY]{2,}$/i.test(raw);
+
+  hide(errorEl);
+  foldingInfoEl.hidden = false;
+  foldingInfoEl.className = "chemspace-info";
+  foldingInfoEl.textContent =
+    "Wird mit Boltz-2 berechnet … das kann je nach Sequenzlänge und Hardware " +
+    "mehrere Minuten dauern (echte ML-Struktur-Vorhersage, keine Näherung).";
+  foldingRunButton.disabled = true;
+
+  try {
+    const response = await fetch("/api/fold", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(
+        isSequence ? { sequence: raw.toUpperCase() } : { name: raw }
+      ),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || "Unbekannter Fehler.");
+    }
+
+    foldingViewer.setMolecule(data.atoms, data.bonds);
+
+    foldingInfoEl.innerHTML = "";
+    const name = document.createElement("span");
+    name.className = "chemspace-info-name";
+    name.textContent = data.common_name;
+    const detail = document.createElement("span");
+    detail.className = "chemspace-info-detail";
+    detail.textContent = data.note;
+    foldingInfoEl.appendChild(name);
+    foldingInfoEl.appendChild(document.createElement("br"));
+    foldingInfoEl.appendChild(detail);
+  } catch (err) {
+    foldingInfoEl.hidden = true;
+    show(errorEl, err.message || "Unbekannter Fehler.");
+  } finally {
+    foldingRunButton.disabled = false;
   }
 });

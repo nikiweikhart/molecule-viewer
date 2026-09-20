@@ -1,0 +1,11 @@
+.git
+docs
+README.md
+backend/.venv
+backend/.venv-boltz
+backend/tools
+backend/pdb_cache
+backend/.env
+backend/.pytest_cache
+**/__pycache__
+**/*.pyc

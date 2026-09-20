@@ -6,11 +6,21 @@ brauchen sie eine Internetverbindung und sind langsamer als reine Unit-Tests.
 Ausführen: aus backend/ heraus `pytest` (mit requirements-dev.txt installiert).
 """
 
+from pathlib import Path
+
+import pytest
 from fastapi.testclient import TestClient
 
 from app import app
 
 client = TestClient(app)
+
+# Boltz-2 braucht eine separate venv (backend/.venv-boltz, Python 3.12 + ROCm-PyTorch,
+# siehe docs/stand.md Phase 0) und eine echte GPU/Internetverbindung -- auf einer
+# frischen Maschine (z.B. dem Deployment-Host) existiert die nicht. Der Erfolgstest
+# wird dann übersprungen statt rot zu laufen; die reinen Validierungstests unten
+# brauchen Boltz-2 gar nicht erst (Längenprüfung passiert vor dem Subprocess-Start).
+_BOLTZ_AVAILABLE = (Path(__file__).resolve().parent.parent / ".venv-boltz" / "Scripts" / "boltz.exe").exists()
 
 
 def test_resolve_water_by_name():
@@ -43,6 +53,44 @@ def test_resolve_unknown_query_returns_400():
     resp = client.post("/api/resolve", json={"query": "definitiv-kein-molekuel-xyz-123"})
     assert resp.status_code == 400
     assert "error" in resp.json()
+
+
+def test_resolve_brand_name_mexalen_is_paracetamol():
+    # "Mexalen" ist der österreichische Markenname für Paracetamol -- PubChem kennt den
+    # Markennamen selbst nicht zuverlässig, daher muss die Übersetzung aus
+    # backend/brand_names.py greifen (siehe chem._resolve_to_names).
+    resp = client.post("/api/resolve", json={"query": "Mexalen"})
+    assert resp.status_code == 200
+    data = resp.json()
+    # PubChems Titel dafür ist "Acetaminophen" (US-Bezeichnung für Paracetamol) -- beide
+    # zulassen, falls sich das mit PubChems Datenbestand mal ändert.
+    assert data["common_name"].lower() in ("acetaminophen", "paracetamol")
+    assert data["note"] is not None and "Markenname" in data["note"]
+
+
+def test_resolve_brand_name_is_case_insensitive():
+    resp = client.post("/api/resolve", json={"query": "mexalen"})
+    assert resp.status_code == 200
+
+
+def test_resolve_ozempic_gives_helpful_too_large_error():
+    # Explizit (noch) nicht unterstützt: Ozempic/Semaglutid ist ein großes Peptid.
+    # Der Markenname wird zwar über brand_names.py auf "semaglutide" aufgelöst und bei
+    # PubChem gefunden, aber MAX_HEAVY_ATOMS in chem.py fängt die anschließende
+    # 3D-Berechnung ab -- klare Fehlermeldung statt Absturz oder ewigem Warten.
+    resp = client.post("/api/resolve", json={"query": "Ozempic"})
+    assert resp.status_code == 400
+    assert "groß" in resp.json()["error"]
+
+
+def test_resolve_heavy_atom_limit_via_direct_smiles():
+    # Direkter Test von MAX_HEAVY_ATOMS in chem._build_structure(), unabhängig vom
+    # Ozempic/Markennamen-Umweg oben -- ein simpler linearer Alkan-SMILES mit 155
+    # Kohlenstoffen (> MAX_HEAVY_ATOMS=150) braucht kein PubChem, da RDKit direktes
+    # SMILES zuerst versucht.
+    resp = client.post("/api/resolve", json={"query": "C" * 155})
+    assert resp.status_code == 400
+    assert "groß" in resp.json()["error"]
 
 
 def test_reactions_list_contains_esterification():
@@ -182,5 +230,33 @@ def test_peptide_unknown_name_returns_400():
 
 def test_peptide_neither_name_nor_sequence_returns_400():
     resp = client.post("/api/peptide", json={})
+    assert resp.status_code == 400
+    assert "error" in resp.json()
+
+
+@pytest.mark.skipif(not _BOLTZ_AVAILABLE, reason="braucht backend/.venv-boltz (Boltz-2), siehe docs/stand.md")
+def test_fold_oxytocin_by_curated_name():
+    # Echter GPU-Rechenlauf inkl. MSA-Server-Aufruf -- dauert ~30-70s (siehe
+    # docs/stand.md, empirisch gemessen), deutlich langsamer als der Rest der
+    # Test-Suite, aber gleiche "keine Mocks"-Linie wie überall sonst hier.
+    resp = client.post("/api/fold", json={"name": "oxytocin"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["atoms"]) > 0
+    assert data["confidence"] is not None
+    assert "complex_plddt" in data["confidence"]
+    assert data["facts"]["formula"]
+
+
+def test_fold_too_long_sequence_returns_400():
+    # Längenprüfung passiert vor dem Boltz-Subprocess-Start -- läuft daher auch
+    # ohne .venv-boltz und ohne GPU/Internet, keine Slow-/Skip-Markierung nötig.
+    resp = client.post("/api/fold", json={"sequence": "A" * 51})
+    assert resp.status_code == 400
+    assert "51" in resp.json()["error"]
+
+
+def test_fold_neither_name_nor_sequence_returns_400():
+    resp = client.post("/api/fold", json={})
     assert resp.status_code == 400
     assert "error" in resp.json()

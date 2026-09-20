@@ -35,6 +35,10 @@ Prozess: `uvicorn` dient das Frontend und die API zugleich.
 - **Molekulardynamik**: Molekül unter simulierter thermischer Bewegung bei
   300 K (selbstgeschriebener Velocity-Verlet-Integrator auf RDKits
   MMFF94-Kraftfeld).
+- **Protein-Struktur-Vorhersage (Boltz-2)**: echte ML-basierte Faltung aus
+  einer Aminosäure-Sequenz (Boltz-2, AlphaFold3-artige Architektur),
+  GPU-beschleunigt über ROCm — braucht eine separate Python-3.12-venv,
+  siehe `docs/stand.md`.
 
 Details zu Architektur, Design-Entscheidungen und bekannten Einschränkungen
 stehen in [`docs/stand.md`](docs/stand.md).

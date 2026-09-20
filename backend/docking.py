@@ -15,6 +15,7 @@ ungenaue Ganz-Protein-Suche vorzutäuschen. Siehe docs/stand.md.
 
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import requests
@@ -25,11 +26,24 @@ import chem
 
 BACKEND_DIR = Path(__file__).parent
 PDB_CACHE_DIR = BACKEND_DIR / "pdb_cache"
+
+# Pip installiert Konsolen-Skripte (meeko) immer direkt neben dem Python-Interpreter,
+# der sie installiert hat -- egal ob das ein venv unter Windows (.venv/Scripts/*.exe)
+# oder Linux (.venv/bin/*, ohne Endung) ist, oder gar kein venv (Docker-Container, siehe
+# Dockerfile). sys.executable statt eines hartkodierten ".venv/Scripts"-Pfads zu nehmen
+# macht das automatisch für alle drei Fälle richtig.
+_SCRIPTS_DIR = Path(sys.executable).parent
+_EXE_SUFFIX = ".exe" if sys.platform == "win32" else ""
+MEEKO_RECEPTOR = _SCRIPTS_DIR / f"mk_prepare_receptor{_EXE_SUFFIX}"
+MEEKO_LIGAND = _SCRIPTS_DIR / f"mk_prepare_ligand{_EXE_SUFFIX}"
+MEEKO_EXPORT = _SCRIPTS_DIR / f"mk_export{_EXE_SUFFIX}"
+
+# Nur unter Windows genutzt (siehe run_vina()) -- Vinas Python-Bindings (pip-Paket
+# "vina") haben dort kein funktionierendes Wheel (github.com/ccsb-scripps/
+# AutoDock-Vina/issues/305), deshalb die offizielle Windows-Binary als Subprocess.
+# Unter Linux/Docker gibt es diese Datei nicht; dort greift stattdessen automatisch
+# der pip-Vina-Pfad in run_vina().
 VINA_BINARY = BACKEND_DIR / "tools" / "vina.exe"
-VENV_SCRIPTS = BACKEND_DIR / ".venv" / "Scripts"
-MEEKO_RECEPTOR = VENV_SCRIPTS / "mk_prepare_receptor.exe"
-MEEKO_LIGAND = VENV_SCRIPTS / "mk_prepare_ligand.exe"
-MEEKO_EXPORT = VENV_SCRIPTS / "mk_export.exe"
 
 RCSB_FILES = "https://files.rcsb.org/download"
 RCSB_DATA = "https://data.rcsb.org/rest/v1/core/entry"
@@ -412,24 +426,52 @@ def _parse_affinities(vina_stdout: str) -> list[float]:
 
 
 def run_vina(receptor_pdbqt: Path, ligand_pdbqt: Path, box: dict, out_path: Path) -> list[float]:
-    if not VINA_BINARY.exists():
-        raise DockingError(f"Vina-Programm fehlt unter {VINA_BINARY}.")
+    if VINA_BINARY.exists():
+        result = _run([
+            str(VINA_BINARY),
+            "--receptor", str(receptor_pdbqt),
+            "--ligand", str(ligand_pdbqt),
+            "--center_x", str(box["center"]["x"]),
+            "--center_y", str(box["center"]["y"]),
+            "--center_z", str(box["center"]["z"]),
+            "--size_x", str(box["size"]["x"]),
+            "--size_y", str(box["size"]["y"]),
+            "--size_z", str(box["size"]["z"]),
+            "--out", str(out_path),
+            "--exhaustiveness", "8",
+        ], "Docking (Vina)")
+        return _parse_affinities(result.stdout)
 
-    result = _run([
-        str(VINA_BINARY),
-        "--receptor", str(receptor_pdbqt),
-        "--ligand", str(ligand_pdbqt),
-        "--center_x", str(box["center"]["x"]),
-        "--center_y", str(box["center"]["y"]),
-        "--center_z", str(box["center"]["z"]),
-        "--size_x", str(box["size"]["x"]),
-        "--size_y", str(box["size"]["y"]),
-        "--size_z", str(box["size"]["z"]),
-        "--out", str(out_path),
-        "--exhaustiveness", "8",
-    ], "Docking (Vina)")
+    return _run_vina_python(receptor_pdbqt, ligand_pdbqt, box, out_path)
 
-    return _parse_affinities(result.stdout)
+
+def _run_vina_python(receptor_pdbqt: Path, ligand_pdbqt: Path, box: dict, out_path: Path) -> list[float]:
+    """Fallback für Umgebungen ohne backend/tools/vina.exe (Linux/Docker, siehe
+    Dockerfile + requirements.txt) -- nutzt Vinas offizielle Python-Bindings
+    (pip-Paket "vina", hat anders als unter Windows echte manylinux-Wheels).
+    Gleiche Parameter/Exhaustiveness wie der Windows-Subprocess-Pfad oben, damit
+    die Ergebnisse zwischen beiden Plattformen vergleichbar bleiben."""
+    try:
+        from vina import Vina
+    except ImportError as exc:
+        raise DockingError(
+            "Kein Vina verfügbar -- weder backend/tools/vina.exe (Windows) noch "
+            "das pip-Paket 'vina' (Linux, siehe requirements.txt) ist installiert."
+        ) from exc
+
+    v = Vina(sf_name="vina", verbosity=0)
+    v.set_receptor(str(receptor_pdbqt))
+    v.set_ligand_from_file(str(ligand_pdbqt))
+    v.compute_vina_maps(
+        center=[box["center"]["x"], box["center"]["y"], box["center"]["z"]],
+        box_size=[box["size"]["x"], box["size"]["y"], box["size"]["z"]],
+    )
+    v.dock(exhaustiveness=8, n_poses=9)
+    v.write_poses(str(out_path), n_poses=9, overwrite=True)
+    # energies() liefert pro Pose eine Zeile, Spalte 0 ist die Gesamt-Affinität
+    # (kcal/mol) -- exakt der Wert, den der Windows-Pfad oben per Regex aus
+    # Vinas Konsolenausgabe zieht.
+    return [float(row[0]) for row in v.energies(n_poses=9)]
 
 
 def _export_poses(out_pdbqt: Path, workdir: Path) -> list[tuple[list[dict], list[dict]]]:
