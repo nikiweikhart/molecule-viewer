@@ -495,7 +495,15 @@ def _run_vina_python(receptor_pdbqt: Path, ligand_pdbqt: Path, box: dict, out_pa
             "das pip-Paket 'vina' (Linux, siehe requirements.txt) ist installiert."
         ) from exc
 
-    v = Vina(sf_name="vina", verbosity=0)
+    # cpu=1 explizit statt Vinas Default (0 = alle erkannten Kerne) -- auf einem
+    # Container mit CPU-Kontingent (z.B. Render Free-Tier, 512 MB RAM) meldet
+    # /proc oft die volle Kernzahl des Host-Rechners, nicht das tatsächliche
+    # Kontingent. Vina würde dann so viele Suchthreads wie gemeldete Kerne
+    # starten, jeder mit eigenen Gitter-Puffern -- reales Symptom auf dem
+    # Deployment: der Prozess wurde beim Docking kommentarlos neu gestartet
+    # (kein Python-Traceback, klassisches OOM-Kill-Muster), lokal unter
+    # Windows mit der echten Kernzahl nie aufgetreten.
+    v = Vina(sf_name="vina", cpu=1, verbosity=0)
     v.set_receptor(str(receptor_pdbqt))
     v.set_ligand_from_file(str(ligand_pdbqt))
     v.compute_vina_maps(
