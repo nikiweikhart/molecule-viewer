@@ -5,9 +5,11 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from brand_names import BRAND_TO_SUBSTANCE
 from chem import ResolveError, resolve
 from chemspace import ChemicalSpaceError, build_chemical_space
 from docking import DockingError, dock, pdb_ligand
+from large_peptides import match as match_large_peptide
 from dynamics import run_md
 from equation import EquationError, build_equation_reaction
 from explain import explain
@@ -80,6 +82,22 @@ class FoldingRequest(BaseModel):
 
 @app.post("/api/resolve")
 def api_resolve(req: ResolveRequest):
+    # Große Peptid-Wirkstoffe (Ozempic/Semaglutid & Co.) zuerst gegen die
+    # kuratierte Liste bekannter, real gemessener Strukturen prüfen -- die
+    # normale Auflösung (RDKit-EmbedMolecule) würde daran wegen
+    # MAX_HEAVY_ATOMS ohnehin nur mit einer "zu groß"-Fehlermeldung
+    # scheitern, siehe large_peptides.py.
+    peptide_match = match_large_peptide(req.query, BRAND_TO_SUBSTANCE)
+    if peptide_match is not None:
+        try:
+            result = pdb_ligand(peptide_match["pdb_id"], chain_ids=peptide_match.get("chain_ids"))
+        except DockingError as e:
+            return JSONResponse(status_code=400, content={"error": str(e)})
+        result["common_name"] = peptide_match["display_name"]
+        if peptide_match.get("caveat"):
+            result["note"] = f"{result['note']}{peptide_match['caveat']}"
+        return result
+
     try:
         result = resolve(req.query)
     except ResolveError as e:

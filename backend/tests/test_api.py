@@ -73,14 +73,46 @@ def test_resolve_brand_name_is_case_insensitive():
     assert resp.status_code == 200
 
 
-def test_resolve_ozempic_gives_helpful_too_large_error():
-    # Explizit (noch) nicht unterstützt: Ozempic/Semaglutid ist ein großes Peptid.
-    # Der Markenname wird zwar über brand_names.py auf "semaglutide" aufgelöst und bei
-    # PubChem gefunden, aber MAX_HEAVY_ATOMS in chem.py fängt die anschließende
-    # 3D-Berechnung ab -- klare Fehlermeldung statt Absturz oder ewigem Warten.
+def test_resolve_ozempic_uses_real_pdb_structure():
+    # Seit 2026-09-20: Ozempic/Semaglutid (und andere große Peptid-Wirkstoffe) werden
+    # VOR der normalen EmbedMolecule-Auflösung gegen large_peptides.py geprüft und
+    # zeigen die reale RCSB-Struktur (4ZGM) statt an MAX_HEAVY_ATOMS zu scheitern.
     resp = client.post("/api/resolve", json={"query": "Ozempic"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["common_name"] == "Semaglutide"
+    assert len(data["atoms"]) > 0
+
+
+def test_resolve_large_peptide_brand_names():
+    for query, expected_name in [
+        ("Wegovy", "Semaglutide"),
+        ("Mounjaro", "Tirzepatide"),
+        ("Victoza", "Liraglutide"),
+        ("insulin", "Insulin"),
+    ]:
+        resp = client.post("/api/resolve", json={"query": query})
+        assert resp.status_code == 200, query
+        assert resp.json()["common_name"] == expected_name, query
+
+
+def test_resolve_insulin_analog_shows_caveat_about_wildtype_structure():
+    # Lantus (Insulin glargin) unterscheidet sich strukturell leicht vom Wildtyp-Insulin,
+    # das die gezeigte 4OGA-Struktur tatsächlich ist -- das muss im Hinweistext stehen,
+    # nicht nur der Markenname übersetzt werden.
+    resp = client.post("/api/resolve", json={"query": "Lantus"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "glargin" in data["common_name"].lower()
+    assert "Wildtyp" in data["note"]
+
+
+def test_resolve_dulaglutide_still_gives_too_large_error():
+    # Trulicity/Dulaglutid ist bewusst NICHT in large_peptides.py, weil keine öffentliche
+    # RCSB-Struktur dafür gefunden wurde -- fällt weiterhin auf die normale (scheiternde)
+    # Auflösung zurück, statt eine geratene PDB-ID zu verwenden.
+    resp = client.post("/api/resolve", json={"query": "Trulicity"})
     assert resp.status_code == 400
-    assert "groß" in resp.json()["error"]
 
 
 def test_resolve_heavy_atom_limit_via_direct_smiles():
