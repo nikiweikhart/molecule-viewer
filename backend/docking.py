@@ -14,6 +14,7 @@ ungenaue Ganz-Protein-Suche vorzutäuschen. Siehe docs/stand.md.
 """
 
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -28,15 +29,37 @@ BACKEND_DIR = Path(__file__).parent
 PDB_CACHE_DIR = BACKEND_DIR / "pdb_cache"
 
 # Pip installiert Konsolen-Skripte (meeko) immer direkt neben dem Python-Interpreter,
-# der sie installiert hat -- egal ob das ein venv unter Windows (.venv/Scripts/*.exe)
-# oder Linux (.venv/bin/*, ohne Endung) ist, oder gar kein venv (Docker-Container, siehe
-# Dockerfile). sys.executable statt eines hartkodierten ".venv/Scripts"-Pfads zu nehmen
-# macht das automatisch für alle drei Fälle richtig.
+# der sie installiert hat -- sys.executable statt eines hartkodierten ".venv/Scripts"-
+# Pfads zu nehmen macht das automatisch für ein venv UND für einen Docker-Container
+# ohne venv richtig (siehe Dockerfile). Die genaue Dateiform unterscheidet sich aber
+# zwischen den Plattformen (empirisch am echten Deployment gefunden, nicht nur
+# angenommen): unter Windows ein `.exe`-Launcher, unter Linux (zumindest für meekos
+# aktuelle 0.8.0-Distribution) eine `.py`-Datei mit Shebang statt eines endungslosen
+# Launchers -- _tool_cmd() unten probiert beide Formen und ruft eine `.py`-Datei
+# explizit über sys.executable auf, statt auf ihre Ausführbarkeitsrechte/Shebang zu
+# vertrauen.
 _SCRIPTS_DIR = Path(sys.executable).parent
-_EXE_SUFFIX = ".exe" if sys.platform == "win32" else ""
-MEEKO_RECEPTOR = _SCRIPTS_DIR / f"mk_prepare_receptor{_EXE_SUFFIX}"
-MEEKO_LIGAND = _SCRIPTS_DIR / f"mk_prepare_ligand{_EXE_SUFFIX}"
-MEEKO_EXPORT = _SCRIPTS_DIR / f"mk_export{_EXE_SUFFIX}"
+MEEKO_RECEPTOR = "mk_prepare_receptor"
+MEEKO_LIGAND = "mk_prepare_ligand"
+MEEKO_EXPORT = "mk_export"
+
+
+def _tool_cmd(name: str) -> list[str]:
+    exe_path = _SCRIPTS_DIR / f"{name}.exe"
+    if exe_path.exists():
+        return [str(exe_path)]
+    plain_path = _SCRIPTS_DIR / name
+    if plain_path.exists():
+        return [str(plain_path)]
+    py_path = _SCRIPTS_DIR / f"{name}.py"
+    if py_path.exists():
+        return [sys.executable, str(py_path)]
+    found = shutil.which(name) or shutil.which(f"{name}.py")
+    if found:
+        return [str(found)] if not found.endswith(".py") else [sys.executable, found]
+    # Nichts gefunden -- _run() gibt dann trotzdem eine sprechende Fehlermeldung
+    # samt Verzeichnis-Inhalt aus, statt hier schon zu raten.
+    return [str(_SCRIPTS_DIR / name)]
 
 # Nur unter Windows genutzt (siehe run_vina()) -- Vinas Python-Bindings (pip-Paket
 # "vina") haben dort kein funktionierendes Wheel (github.com/ccsb-scripps/
@@ -399,7 +422,7 @@ def prepare_receptor(pdb_path: Path) -> Path:
         return pdbqt_path
 
     _run([
-        str(MEEKO_RECEPTOR),
+        *_tool_cmd(MEEKO_RECEPTOR),
         "--read_pdb", str(pdb_path),
         "-o", str(basename),
         "-p",
@@ -422,7 +445,7 @@ def prepare_ligand(mol, workdir: Path) -> Path:
     writer.write(mol)
     writer.close()
 
-    _run([str(MEEKO_LIGAND), "-i", str(sdf_path), "-o", str(pdbqt_path)], "Liganden-Vorbereitung")
+    _run([*_tool_cmd(MEEKO_LIGAND), "-i", str(sdf_path), "-o", str(pdbqt_path)], "Liganden-Vorbereitung")
 
     if not pdbqt_path.exists():
         raise DockingError("Liganden-Vorbereitung hat keine PDBQT-Datei erzeugt.")
@@ -489,7 +512,7 @@ def _run_vina_python(receptor_pdbqt: Path, ligand_pdbqt: Path, box: dict, out_pa
 
 def _export_poses(out_pdbqt: Path, workdir: Path) -> list[tuple[list[dict], list[dict]]]:
     sdf_path = workdir / "poses.sdf"
-    _run([str(MEEKO_EXPORT), str(out_pdbqt), "-s", str(sdf_path)], "Posen-Export")
+    _run([*_tool_cmd(MEEKO_EXPORT), str(out_pdbqt), "-s", str(sdf_path)], "Posen-Export")
 
     supplier = Chem.SDMolSupplier(str(sdf_path), removeHs=False)
     poses = []
