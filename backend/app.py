@@ -15,6 +15,7 @@ from equation import EquationError, build_equation_reaction
 from explain import explain
 from folding import BOLTZ_AVAILABLE, FoldingError, build_folding
 from peptide import PeptideError, build_peptide
+from reaction_predict import PredictionError, build_predicted_reaction
 from reactions import get_reaction, list_reactions
 from salts import SaltError, build_salt, list_ions
 
@@ -69,6 +70,10 @@ class DynamicsRequest(BaseModel):
 
 class EquationRequest(BaseModel):
     equation: str
+
+
+class EquationPredictRequest(BaseModel):
+    reactants: list[str]
 
 
 class PeptideRequest(BaseModel):
@@ -173,6 +178,16 @@ def api_equation(req: EquationRequest):
     try:
         return build_equation_reaction(req.equation)
     except EquationError as e:
+        return JSONResponse(status_code=400, content={"error": str(e)})
+
+
+@app.post("/api/equation/predict")
+def api_equation_predict(req: EquationPredictRequest):
+    # Produktvorhersage: nur Edukte eingetippt, ohne "->" -- siehe reaction_predict.py
+    # für die bewusst eng begrenzte Menge an erkannten Reaktionstypen.
+    try:
+        return build_predicted_reaction(req.reactants)
+    except (PredictionError, EquationError) as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
 
 

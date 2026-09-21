@@ -192,6 +192,38 @@ def test_equation_impossible_returns_400():
     assert "error" in resp.json()
 
 
+def test_equation_predict_combustion():
+    resp = client.post("/api/equation/predict", json={"reactants": ["CH4", "O2"]})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["reaction_type"] == "Verbrennung"
+    assert "CO*2" in data["formula_label"]
+    assert "H*2O" in data["formula_label"]
+
+
+def test_equation_predict_neutralisation():
+    resp = client.post("/api/equation/predict", json={"reactants": ["HCl", "NaOH"]})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["reaction_type"] == "Neutralisation (Säure-Base-Reaktion)"
+    assert "H*2O" in data["formula_label"]
+
+
+def test_equation_predict_metal_plus_acid():
+    resp = client.post("/api/equation/predict", json={"reactants": ["zinc", "HCl"]})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["reaction_type"] == "Metall + Säure"
+
+
+def test_equation_predict_unrecognized_returns_400():
+    # Eisen ist absichtlich nicht auto-erkannt (mehrdeutige Oxidationsstufe je
+    # nach Reaktionspartner, siehe reaction_predict.py).
+    resp = client.post("/api/equation/predict", json={"reactants": ["Fe", "Cl2"]})
+    assert resp.status_code == 400
+    assert "error" in resp.json()
+
+
 def test_dock_3ptb_benzamidine():
     resp = client.post("/api/dock", json={"pdb_id": "3PTB", "ligand_query": "benzamidine"})
     assert resp.status_code == 200

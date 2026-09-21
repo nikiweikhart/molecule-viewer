@@ -590,24 +590,35 @@ equationSolveButton.addEventListener("click", async () => {
   // "*" ist nur eine Anzeige-Konvention für tiefgestellte Zahlen (siehe
   // formatSubscripts) -- fürs eigentliche Lösen bedeutungslos, wird entfernt,
   // damit "CH*4" genau wie "CH4" aufgelöst wird.
-  const equation = equationInput.value.replace(/\*/g, "").trim();
-  if (!equation) {
-    show(errorEl, "Bitte eine Reaktionsgleichung eingeben.");
+  const raw = equationInput.value.replace(/\*/g, "").trim();
+  if (!raw) {
+    show(errorEl, "Bitte eine Reaktionsgleichung oder nur die Edukte eingeben.");
     return;
   }
+  // Kein Pfeil in der Eingabe -> nur Edukte getippt, Produkte werden automatisch
+  // vorhergesagt (siehe backend/reaction_predict.py für die erkannten Reaktionstypen).
+  const hasArrow = /->|=|→/.test(raw);
 
   hide(errorEl);
   equationInfoEl.hidden = false;
   equationInfoEl.className = "chemspace-info";
-  equationInfoEl.textContent = "Wird gelöst …";
+  equationInfoEl.textContent = hasArrow ? "Wird gelöst …" : "Produkte werden vorhergesagt …";
   equationSolveButton.disabled = true;
 
   try {
-    const response = await fetch("/api/equation", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ equation }),
-    });
+    const response = hasArrow
+      ? await fetch("/api/equation", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ equation: raw }),
+        })
+      : await fetch("/api/equation/predict", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            reactants: raw.split("+").map((s) => s.trim()).filter(Boolean),
+          }),
+        });
     const data = await response.json();
     if (!response.ok) {
       throw new Error(data.error || "Unbekannter Fehler.");
@@ -621,7 +632,9 @@ equationSolveButton.addEventListener("click", async () => {
     name.innerHTML = formatSubscripts(data.formula_label);
     const recognized = document.createElement("span");
     recognized.className = "chemspace-info-detail";
-    recognized.textContent = `Erkannt als: ${data.label}`;
+    recognized.textContent = data.reaction_type
+      ? `Erkannt als ${data.reaction_type}: ${data.label}`
+      : `Erkannt als: ${data.label}`;
     const detail = document.createElement("span");
     detail.className = "chemspace-info-detail";
     detail.textContent =
@@ -1004,7 +1017,7 @@ const MODE_INTROS = {
     'Gib einen Namen, Markennamen, eine Formel oder einen SMILES-Code ein — z. B. "Mexalen" oder "CCO" — und erzeuge ein rotierbares 3D-Modell.',
   reaction: "Wähle eine vorbereitete Reaktion aus der Liste und lass sie als Animation ablaufen.",
   equation:
-    'Tippe eine unausgeglichene Reaktionsgleichung ein (z. B. CH4 + O2 -> CO2 + H2O) — sie wird automatisch ausgeglichen und animiert. Tipp: ein "*" direkt vor einer Zahl zeigt sie tiefgestellt an, z. B. wird aus "CH*4" beim Tippen "CH₄" in der Vorschau darunter.',
+    'Tippe eine unausgeglichene Reaktionsgleichung ein (z. B. CH4 + O2 -> CO2 + H2O) — sie wird automatisch ausgeglichen und animiert. Oder nur die Edukte ohne Pfeil (z. B. nur "CH4 + O2") — dann werden die Produkte für Verbrennung, Neutralisation, Metall+Säure und Synthese aus Elementen automatisch vorhergesagt. Tipp: ein "*" direkt vor einer Zahl zeigt sie tiefgestellt an, z. B. wird aus "CH*4" beim Tippen "CH₄" in der Vorschau darunter.',
   chemspace: "Trage mehrere Moleküle ein (ein Name pro Zeile), um eine 2D-Karte ihrer chemischen Ähnlichkeit zu erzeugen.",
   docking: "Gib eine PDB-ID und einen Liganden ein, um zu sehen, wie der Ligand in die Bindungstasche des Proteins passt.",
   dynamics: "Simuliere, wie sich ein Molekül bei Raumtemperatur bewegt — ein einfaches Kraftfeld, keine Quantenmechanik.",

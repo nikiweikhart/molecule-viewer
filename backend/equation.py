@@ -318,12 +318,12 @@ def _format_formula_side(species_list: list[_Species], coeffs: list[int]) -> str
     return " + ".join(parts)
 
 
-def build_equation_reaction(text: str) -> dict:
-    reactant_queries, product_queries = _parse_equation(text)
-
-    reactant_species = [_resolve_species(q) for q in reactant_queries]
-    product_species = [_resolve_species(q) for q in product_queries]
-
+def build_reaction_from_species(reactant_species: list[_Species], product_species: list[_Species]) -> dict:
+    """Kernlogik von build_equation_reaction(), aber für schon aufgelöste
+    Spezies statt Rohtext -- genutzt sowohl vom Text-Gleichungslöser unten
+    (nach _resolve_species je Seite) als auch von reaction_predict.py, das
+    Produkte selbst herleitet (Verbrennung/Neutralisation/...) und sie ohne
+    weiteren PubChem-Textumweg direkt hierher durchreicht."""
     coeffs = _balance(reactant_species, product_species)
     n_react = len(reactant_species)
     reactant_coeffs = coeffs[:n_react]
@@ -358,6 +358,13 @@ def build_equation_reaction(text: str) -> dict:
         "broken_bonds": broken_bonds,
         "formed_bonds": formed_bonds,
     }
+
+
+def build_equation_reaction(text: str) -> dict:
+    reactant_queries, product_queries = _parse_equation(text)
+    reactant_species = [_resolve_species(q) for q in reactant_queries]
+    product_species = [_resolve_species(q) for q in product_queries]
+    return build_reaction_from_species(reactant_species, product_species)
 
 
 if __name__ == "__main__":

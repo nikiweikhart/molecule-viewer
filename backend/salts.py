@@ -154,7 +154,11 @@ def _layout_ions(smiles_list: list[str]) -> tuple[list[dict], list[dict]]:
     return all_atoms, all_bonds
 
 
-def build_salt(cation_key: str, anion_key: str) -> dict:
+def compute(cation_key: str, anion_key: str) -> dict:
+    """Reine Formel-/Namens-/SMILES-Berechnung per Kreuzregel, ohne 3D-Ansicht
+    oder Fakten-Panel -- gemeinsamer Kern für build_salt() (Frontend-Route)
+    und reaction_predict.py (Gleichungslöser-Produktvorhersage, braucht nur
+    Name+SMILES+Elementzusammensetzung, keine eigene 3D-Ansicht)."""
     cation = CATIONS.get((cation_key or "").strip().lower())
     anion = ANIONS.get((anion_key or "").strip().lower())
     if cation is None:
@@ -184,9 +188,26 @@ def build_salt(cation_key: str, anion_key: str) -> dict:
     for el, n_atoms in anion.atom_counts.items():
         elements += [el] * (n_atoms * anion_count)
 
+    return {
+        "cation": cation,
+        "anion": anion,
+        "cation_count": cation_count,
+        "anion_count": anion_count,
+        "formula_label": formula_label,
+        "name": name,
+        "elements": elements,
+        "smiles": ".".join([cation.smiles] * cation_count + [anion.smiles] * anion_count),
+    }
+
+
+def build_salt(cation_key: str, anion_key: str) -> dict:
+    info = compute(cation_key, anion_key)
+    cation, anion = info["cation"], info["anion"]
+    cation_count, anion_count = info["cation_count"], info["anion_count"]
+
     facts = {
-        "formula": docking._hill_formula(elements),
-        "molweight": docking._atoms_molweight(elements),
+        "formula": docking._hill_formula(info["elements"]),
+        "molweight": docking._atoms_molweight(info["elements"]),
         "logp": "–",
         "tpsa": "–",
         "h_donors": "–",
@@ -198,10 +219,10 @@ def build_salt(cation_key: str, anion_key: str) -> dict:
     atoms, bonds = _layout_ions(smiles_list)
 
     note = (
-        f"Formel per Kreuzregel berechnet: {cation.label} ({m:+d}) mit {anion.label} ({-n:+d}) "
-        f"→ Verhältnis {cation_count}:{anion_count}. Als lose Ionenpaare dargestellt, keine "
-        "echte Kristallstruktur -- ein reales Salz bildet ein Ionengitter aus sehr vielen "
-        "Ionen, kein einzelnes Molekül."
+        f"Formel per Kreuzregel berechnet: {cation.label} ({cation.charge:+d}) mit "
+        f"{anion.label} ({anion.charge:+d}) → Verhältnis {cation_count}:{anion_count}. Als "
+        "lose Ionenpaare dargestellt, keine echte Kristallstruktur -- ein reales Salz bildet "
+        "ein Ionengitter aus sehr vielen Ionen, kein einzelnes Molekül."
     )
     if not atoms:
         note += " 3D-Ansicht konnte für diese Kombination nicht berechnet werden, nur die Formel."
@@ -210,10 +231,10 @@ def build_salt(cation_key: str, anion_key: str) -> dict:
         "atoms": atoms,
         "bonds": bonds,
         "facts": facts,
-        "common_name": name,
+        "common_name": info["name"],
         "iupac_name": None,
         "note": note,
-        "formula_label": formula_label,
+        "formula_label": info["formula_label"],
     }
 
 
