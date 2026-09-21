@@ -1,5 +1,116 @@
 # Stand: Molekül-Viewer
 
+## 2026-09-21 (parallel, autonomer Lasttest-Durchlauf): ~1000 Alltagsbegriffe durchgetestet, drei systemische Ursachen statt Einzelpatches behoben
+
+Niki wollte keine Einzelfall-Fixes, sondern wissen, ob ~1000 der
+alltäglichsten/wichtigsten Begriffe durch `/api/resolve` funktionieren, und
+falls nicht, die **Ursache** beheben statt jeden Fall einzeln zu patchen.
+Lief zeitlich parallel zu einer anderen Chat-Sitzung mit Niki (Bibliothek-
+Suche/Salzlöser/Gleichungslöser-Vorhersage, siehe Eintrag direkt unten) --
+beide Arbeitsstände sind sauber zusammengeführt, keine Konflikte.
+
+**Testaufbau:** 1034 deduplizierte Begriffe zusammengestellt (Elemente,
+anorganische Grundstoffe, Haushaltschemikalien, Loesungsmittel, Zucker,
+Aminosäuren, Vitamine, Hormone, ~60 Generika- und ~40 Marken-Arzneinamen,
+Polymere, Gase, Minerale, Chemie-Unterrichtsstoffe, Formeln, SMILES, Aromen,
+psychoaktive Stoffe u.a.) -- bewusst mit deutlichem Schwerpunkt auf
+**deutschen** Alltagsnamen, weil die App komplett auf Deutsch läuft und für
+einen deutschsprachigen Nutzer gebaut ist. Alle einzeln per Skript gegen den
+lokalen Server (`POST /api/resolve`) gejagt, Ergebnisse in JSON geloggt.
+
+**Erster Durchlauf: 767/1034 ok (74%).** Analyse der 267 Fehlschläge (nicht
+einzeln durchgeschaut, sondern nach Fehlermeldung gruppiert) ergab **drei
+echte, generalisierbare Ursachen** statt hunderter Einzelfälle:
+
+**1. Bug: PubChems Rate-Limit (HTTP 429) wurde wie ein echtes "nicht
+gefunden" behandelt.** `chem._request_with_retry()` hat bisher nur bei
+Timeout/Verbindungsfehler/5xx wiederholt (`resp.status_code < 500` galt
+als "fertig, kein Retry") -- ein 429 fiel mit rein und wurde sofort als
+Nichttreffer gewertet und so gecacht. Beim harten Lasttest hat PubChem das
+ausgelöst: völlig normale Stoffe wie Alprazolam oder Xylol schlugen mitten
+im Testlauf fehl, funktionierten Minuten später beim manuellen Nachtesten
+aber sofort wieder. **Fix:** 429 zählt jetzt als transient, wird mit
+Backoff wiederholt (respektiert `Retry-After`, falls PubChem den mitschickt),
+und wenn selbst nach allen Retries noch 429 kommt, gibt es eine ehrliche
+"PubChem drosselt gerade"-Fehlermeldung statt eines stillen
+Fake-Nichttreffers. Betrifft nicht nur den Testlauf: jede Anfrage, die
+mehrere Stoffe kurz hintereinander auflöst (Gleichungslöser, chemischer
+Raum), war vorher für dasselbe Muster anfällig.
+
+**2. Fehlende Übersetzung deutscher Alltagsnamen -- der mit Abstand größte
+Batzen.** PubChems Namenssuche ist englisch-zentriert und kennt Wörter wie
+"Kochsalz", "Essigsäure", "Natron" oder "Blauer Vitriol" nicht, obwohl der
+gemeinte Stoff eindeutig ist und unter seinem englischen Namen (Sodium
+Chloride, Acetic Acid, Sodium Bicarbonate, Copper Sulfate) sofort gefunden
+wird. Exakt das gleiche Muster, das `brand_names.py` schon für Markennamen
+löst -- jetzt als eigenes Modul **`backend/common_names.py`**
+(`COMMON_NAME_TRANSLATIONS`, ~95 Einträge, echte Umlaute UND die
+ae/oe/ue/ss-Ersatzschreibweise als je eigener Key) nachgebaut und an
+derselben Stelle in `chem._resolve_to_names()` eingehängt (Markenname zuerst
+geprüft, dann Alltagsname, beide schließen sich gegenseitig aus). Bewusst
+NICHT aufgenommen: reine Produkt-/Gemisch-Bezeichnungen ohne einen klar
+dominanten Reinstoff ("Waschmittel", "Entkalker", "Desinfektionsmittel",
+"Motoröl") -- da wäre jede Zuordnung zu einem Molekül eine Erfindung, gleiche
+ehrliche Linie wie bei Dulaglutide/Trulicity in `large_peptides.py`. Ein
+paar Fälle mit einem klar überwiegenden Wirkstoff sind trotzdem drin
+(Backpulver/Backtriebmittel → Natriumbicarbonat, Abflussreiniger →
+Natriumhydroxid), der Hinweistext beim Treffer macht die Übersetzung dabei
+immer transparent.
+
+**3. RDKits Standard-3D-Einbettung scheitert bei manchen validen, aber
+komplexeren Molekülen zuverlässig.** Gerbsäure (Tannic Acid, 122
+Schweratome, korrekt aufgelöst) lieferte bei `AllChem.EmbedMolecule(mol,
+AllChem.ETKDGv3())` reproduzierbar `-1` (3 von 3 Versuchen) -- nicht weil das
+Molekül ungültig wäre, sondern weil ETKDGv3s Standardstrategie für so einen
+Fall nicht konvergiert. `useRandomCoords=True` (das gleiche Mittel, das
+`peptide.py` schon für die zyklischen Disulfidbrücken-Strukturen nutzt)
+behebt das zuverlässig, per Test bestätigt. **Fix in
+`chem._build_structure()`:** erst der normale (schnellere) Versuch, bei
+Fehlschlag automatisch ein zweiter Versuch mit `useRandomCoords=True` --
+kein Spezialfall für Gerbsäure, gilt für jedes Molekül, das denselben Weg
+nimmt.
+
+**Ergebnis nach den drei Fixes, gegen dieselben 267 vorherigen Fehlschläge
+erneut getestet (Server neu gestartet, damit der In-Memory-Cache leer ist):**
+767 + 65 (Retest 1, v.a. Retry-Fix + erste Übersetzungen) + 5 (Retest 2, nach
+zwei nachträglich ergänzten Übersetzungen + Embed-Fallback) = **837 von 1034
+(81%)**.
+
+**Die verbleibenden ~197 Fehlschläge sind nach Durchsicht keine Bugs mehr,
+sondern korrekte, ehrliche Grenzen** (gleiche Linie wie der Rest des
+Projekts an vielen Stellen): Polymere ohne eine einzelne definierte Struktur
+(Polyethylen, PVC, Teflon, ...), echte Stoffgemische (Öle, Wachse, Teer,
+Kohle, Reinigungsprodukte), komplexe Biomoleküle ohne PubChem-Kleinmolekül-
+Eintrag (Stärke, Cellulose, DNA/RNA, Kollagen, ...; per direkter PubChem-
+Autocomplete-Abfrage verifiziert, dass es dafür wirklich keinen sauberen
+Treffer gibt), Kombi-/Kräuterpräparate (Iberogast, Sinupret, Neo Citran),
+ein paar noch fehlende AT/DE-Markennamen (Perskindol, Otriven, ...) und ein
+Dutzend absichtlich konstruierte Test-Wortkombinationen, die kein echter
+Nutzer so eintippen würde (z.B. "banana isoamyl acetate"). Eine Ausnahme
+notiert, aber nicht behoben: **Glucagon** (echtes Hormon-Peptid) fällt
+zwischen die Stühle -- zu groß für die normale Auflösung (>150 Schweratome),
+zu lang für den 15-Reste-Peptidmodus. Wäre ein Kandidat für
+`large_peptides.py`, falls eine passende PDB-Struktur existiert (nicht
+recherchiert, außerhalb des heutigen Auftrags).
+
+**Neue Backend-Tests** (`tests/test_api.py`, 5 neue): deutscher Alltagsname
+("Kochsalz" → Sodium Chloride, mit Hinweistext-Check), echter Umlaut
+("Essigsäure"), Embed-Fallback (Gerbsäure liefert eine Struktur statt
+Fehler), plus zwei isolierte Unit-Tests für `_request_with_retry()` mit
+einer Fake-Response (429 → Retry → 200 erfolgreich; dauerhaftes 429 → saubere
+`ResolveError` statt stillem Fake-Nichttreffer) -- einzige bewusste Ausnahme
+von der sonstigen "kein Mocking"-Linie der Testdatei, weil sich PubChem
+nicht auf Kommando drosseln lässt, um einen echten 429 zu erzeugen. Alle 45
+Tests grün (40 vorher + 5 neue).
+
+**Nicht gemacht, bewusst außerhalb des heutigen Auftrags:** eine breitere
+Lösung für Polymere/Materialien (z.B. eine repräsentative
+Wiederholungseinheit statt einer echten Kette anzeigen, ähnlich der
+"vereinfacht dargestellt"-Linie bei Insulin-Analoga) wäre möglich, wurde
+aber nicht umgesetzt -- Niki hat nach Root-Cause-Fixes gefragt, nicht nach
+einer Erweiterung des Funktionsumfangs. Testskripte/Rohdaten liegen nur im
+Scratchpad dieser Sitzung, nicht im Repo.
+
 ## 2026-09-21 (später, im Chat mit Niki): Bibliothek-Suche, Salzformel-Löser, Produktvorhersage im Gleichungslöser
 
 Niki wollte drei Ergänzungen, alle umgesetzt, getestet (Backend-Tests +

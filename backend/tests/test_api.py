@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+import chem
 from app import app
 
 client = TestClient(app)
@@ -71,6 +72,39 @@ def test_resolve_brand_name_mexalen_is_paracetamol():
 def test_resolve_brand_name_is_case_insensitive():
     resp = client.post("/api/resolve", json={"query": "mexalen"})
     assert resp.status_code == 200
+
+
+def test_resolve_german_common_name_kochsalz_is_sodium_chloride():
+    # "Kochsalz" ist der deutsche Alltagsname fuer Natriumchlorid -- PubChems
+    # Namenssuche ist englisch-zentriert und kennt ihn nicht direkt, siehe
+    # backend/common_names.py (gefunden per echtem 1000-Begriffe-Lasttest,
+    # docs/stand.md). Muss ueber COMMON_NAME_TRANSLATIONS aufgeloest werden.
+    resp = client.post("/api/resolve", json={"query": "Kochsalz"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["common_name"].lower() == "sodium chloride"
+    assert data["note"] is not None and "gebräuchlicher Name" in data["note"]
+
+
+def test_resolve_german_common_name_with_umlaut():
+    # Echte Umlaute (nicht die ae/oe/ue-Ersatzschreibweise) muessen genauso
+    # funktionieren -- beide Schreibweisen stehen als eigene Dict-Keys in
+    # common_names.py.
+    resp = client.post("/api/resolve", json={"query": "Essigsäure"})
+    assert resp.status_code == 200
+    assert resp.json()["common_name"].lower() == "acetic acid"
+
+
+def test_resolve_complex_molecule_uses_embed_fallback():
+    # Gerbsaeure (Tannic Acid, 122 Schweratome) scheitert mit RDKits
+    # Standard-ETKDGv3-Einbettung zuverlässig (per Lasttest gefunden) --
+    # chem._build_structure() muss automatisch mit useRandomCoords=True
+    # nachfassen, statt sofort aufzugeben.
+    resp = client.post("/api/resolve", json={"query": "gerbsaeure"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["common_name"].lower() == "tannic acid"
+    assert len(data["atoms"]) > 0
 
 
 def test_resolve_ozempic_uses_real_pdb_structure():
@@ -363,3 +397,41 @@ def test_fold_neither_name_nor_sequence_returns_400():
     resp = client.post("/api/fold", json={})
     assert resp.status_code == 400
     assert "error" in resp.json()
+
+
+def test_request_with_retry_recovers_from_429(monkeypatch):
+    # Einzige Ausnahme von der "kein Mocking"-Linie oben: PubChem laesst sich
+    # nicht auf Kommando drosseln, um einen echten 429 zu erzeugen -- gefunden
+    # per echtem 1000-Begriffe-Lasttest (docs/stand.md), wo genau das
+    # passierte und fälschlich wie ein "nicht gefunden" behandelt wurde, weil
+    # _request_with_retry nur < 500 als "fertig, kein Retry" wertete. Hier
+    # wird nur die Wrapper-Funktion selbst isoliert getestet, nicht PubChem.
+    calls = []
+
+    class FakeResponse:
+        def __init__(self, status_code, headers=None):
+            self.status_code = status_code
+            self.headers = headers or {}
+
+    def fake_get(url, timeout=10, **kwargs):
+        calls.append(url)
+        if len(calls) == 1:
+            return FakeResponse(429, headers={"Retry-After": "0"})
+        return FakeResponse(200)
+
+    monkeypatch.setattr(chem, "_RETRY_BACKOFF_S", 0.01)
+    resp = chem._request_with_retry(fake_get, "https://example.invalid")
+    assert resp.status_code == 200
+    assert len(calls) == 2  # erster Versuch 429, zweiter (Retry) 200
+
+
+def test_request_with_retry_gives_up_after_persistent_429(monkeypatch):
+    def fake_get(url, timeout=10, **kwargs):
+        class FakeResponse:
+            status_code = 429
+            headers = {}
+        return FakeResponse()
+
+    monkeypatch.setattr(chem, "_RETRY_BACKOFF_S", 0.01)
+    with pytest.raises(chem.ResolveError):
+        chem._request_with_retry(fake_get, "https://example.invalid")

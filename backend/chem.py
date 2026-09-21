@@ -9,6 +9,7 @@ from rdkit import Chem
 from rdkit.Chem import AllChem, Descriptors, rdMolDescriptors
 
 from brand_names import BRAND_TO_SUBSTANCE
+from common_names import COMMON_NAME_TRANSLATIONS
 
 PUBCHEM_BASE = "https://pubchem.ncbi.nlm.nih.gov/rest/pug"
 
@@ -74,21 +75,30 @@ def _resolve_to_names(query: str) -> tuple[_NameInfo, str | None]:
     # 2) Markennamen (z.B. "Mexalen", "Ozempic") in den zugehörigen Wirkstoffnamen
     # übersetzen, damit Nutzer:innen nicht den wissenschaftlichen/generischen Namen
     # wissen müssen -- siehe brand_names.py für Details und die Liste selbst.
-    brand_substance = BRAND_TO_SUBSTANCE.get(query.strip().lower())
-    lookup_name = brand_substance or query
+    key = query.strip().lower()
+    brand_substance = BRAND_TO_SUBSTANCE.get(key)
+    # 2b) Gleiches Prinzip für gebräuchliche (v.a. deutsche) Alltagsnamen wie
+    # "Kochsalz" oder "Essigsäure" -- PubChems Namenssuche ist englisch-zentriert
+    # und kennt diese meist nicht, siehe common_names.py. Nur versuchen, wenn kein
+    # Markenname getroffen hat (schließen sich gegenseitig aus, kommt in der Praxis
+    # aber nicht vor -- kein Markenname sieht wie ein deutscher Stoffname aus).
+    common_substance = COMMON_NAME_TRANSLATIONS.get(key) if brand_substance is None else None
+    lookup_name = brand_substance or common_substance or query
 
-    # 3) Als Name bei PubChem nachschlagen (ggf. mit dem übersetzten Wirkstoffnamen).
+    # 3) Als Name bei PubChem nachschlagen (ggf. mit dem übersetzten Namen).
     info = _pubchem_lookup_by_name(lookup_name)
     if info is not None:
         note = None
         if brand_substance is not None:
             note = f"„{query}“ wurde als Markenname für {info.common_name} erkannt."
+        elif common_substance is not None:
+            note = f"„{query}“ wurde als gebräuchlicher Name für {info.common_name} erkannt."
         return info, note
 
     # 4) Als Summenformel bei PubChem suchen (Mehrdeutigkeits-Fall) -- ergibt bei einem
-    # erkannten Markennamen keinen Sinn (Markennamen sehen nie wie Formeln aus), daher nur
-    # versuchen, wenn Schritt 2 nichts gefunden hat.
-    if brand_substance is None:
+    # erkannten Marken-/Alltagsnamen keinen Sinn (die sehen nie wie Formeln aus), daher
+    # nur versuchen, wenn Schritt 2 nichts gefunden hat.
+    if brand_substance is None and common_substance is None:
         info, note = _pubchem_lookup_by_formula(query)
         if info is not None:
             return info, note
@@ -110,13 +120,23 @@ _RETRY_BACKOFF_S = 0.5
 
 def _request_with_retry(method, url, **kwargs):
     """Wiederholt eine PubChem-Anfrage bei transienten Fehlern (Timeout,
-    Verbindungsabbruch, 5xx) -- ein 404 o.ä. ("dieser Name/diese Formel
+    Verbindungsabbruch, 5xx, 429) -- ein 404 o.ä. ("dieser Name/diese Formel
     existiert nicht bei PubChem") ist eine normale, gültige Antwort und wird
     NICHT wiederholt, nur echte Netzwerk-/Serverfehler. Ohne das würde ein
     einzelner kurzer Netzwerk-Hänger fälschlich dauerhaft im Cache landen
     (siehe _name_cache/_smiles_cache/_formula_cache oben -- die cachen auch
     "nicht gefunden", was für einen echten 404 richtig ist, für einen
-    transienten Fehler aber ein falsches Dauer-Ergebnis wäre)."""
+    transienten Fehler aber ein falsches Dauer-Ergebnis wäre).
+
+    429 (Too Many Requests) zaehlt bewusst als transient, nicht als "nicht
+    gefunden" -- per echtem 1000-Begriffe-Lasttest gefunden: PubChem drosselt
+    bei vielen Anfragen kurz hintereinander (z.B. beim Gleichungsloeser oder
+    chemischen Raum, die mehrere Stoffe pro Anfrage aufloesen) mit 429, und
+    das wurde vorher genau wie ein echtes "gibt's nicht" behandelt -- voellig
+    normale Stoffe (z.B. Alprazolam, Xylol) verschwanden dadurch fuer den
+    Rest der Prozesslaufzeit faelschlich aus dem Cache. PubChems eigener
+    `Retry-After`-Header wird respektiert, falls vorhanden, sonst der normale
+    Backoff verwendet."""
     last_exc = None
     resp = None
     for attempt in range(_MAX_RETRIES + 1):
@@ -125,15 +145,30 @@ def _request_with_retry(method, url, **kwargs):
         except requests.RequestException as exc:
             last_exc = exc
         else:
-            if resp.status_code < 500:
+            if resp.status_code != 429 and resp.status_code < 500:
                 return resp
             last_exc = None
         if attempt < _MAX_RETRIES:
-            time.sleep(_RETRY_BACKOFF_S * (attempt + 1))
+            wait = _RETRY_BACKOFF_S * (attempt + 1)
+            if resp is not None and resp.status_code == 429:
+                retry_after = resp.headers.get("Retry-After")
+                if retry_after is not None:
+                    try:
+                        wait = max(wait, float(retry_after))
+                    except ValueError:
+                        pass
+            time.sleep(wait)
     if last_exc is not None:
         raise ResolveError(
             "PubChem ist gerade nicht erreichbar -- bitte in ein paar Sekunden nochmal versuchen."
         ) from last_exc
+    if resp is not None and resp.status_code == 429:
+        # Auch nach allen Retries noch gedrosselt -- NICHT als resp.status_code!=200
+        # durchreichen, sonst würde der Aufrufer das faelschlich als "nicht gefunden"
+        # werten und dauerhaft so cachen (siehe Docstring oben).
+        raise ResolveError(
+            "PubChem drosselt gerade Anfragen (zu viele auf einmal) -- bitte kurz warten und nochmal versuchen."
+        )
     return resp
 
 
@@ -304,6 +339,18 @@ def _build_structure(smiles: str) -> tuple[list[dict], list[dict], dict]:
 
     mol = Chem.AddHs(mol)
     embed_result = AllChem.EmbedMolecule(mol, AllChem.ETKDGv3())
+    if embed_result != 0:
+        # Die Standard-Einbettung scheitert bei manchen groesseren/ringreichen,
+        # aber völlig validen Molekülen zuverlässig (gefunden per 1000-Begriffe-
+        # Lasttest, z.B. Gerbsäure/Tannic Acid, 122 Schweratome) -- nicht weil
+        # das Molekül ungültig wäre, sondern weil ETKDGv3s Standardstrategie für
+        # solche Fälle nicht konvergiert. useRandomCoords=True (gleiches Mittel,
+        # das peptide.py schon fuer die zyklischen Disulfidbrücken-Strukturen
+        # nutzt) behebt das zuverlässig -- als Fallback, nicht als Standard,
+        # weil der normale Weg für die allermeisten Moleküle schneller ist.
+        params = AllChem.ETKDGv3()
+        params.useRandomCoords = True
+        embed_result = AllChem.EmbedMolecule(mol, params)
     if embed_result != 0:
         raise ResolveError("Konnte keine 3D-Struktur berechnen.")
     AllChem.MMFFOptimizeMolecule(mol)
