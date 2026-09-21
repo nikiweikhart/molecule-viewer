@@ -965,6 +965,7 @@ function activateMode(mode) {
   modeTitleEl.textContent = MODE_LABELS[mode];
   closeLibraryFlyout();
   maybeShowIntro(`mode:${mode}`, MODE_INTROS[mode]);
+  window.scrollTo({ top: 0 });
 
   requestAnimationFrame(() => {
     const resize = MODE_RESIZE[mode];
