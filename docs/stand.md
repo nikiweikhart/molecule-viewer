@@ -1,5 +1,83 @@
 # Stand: Molekül-Viewer
 
+## 2026-09-21 (später, im Chat mit Niki): Bibliothek-Suche, Salzformel-Löser, Produktvorhersage im Gleichungslöser
+
+Niki wollte drei Ergänzungen, alle umgesetzt, getestet (Backend-Tests +
+Browser) und gepusht:
+
+**1. Bibliothek-Suchfeld.** Neues Eingabefeld oben im Bibliothek-Flyout
+(`frontend/index.html`/`app.js`, `filterLibrary()`) — filtert live nach
+Kartentext ODER Kategorietitel (z.B. "Hormone" zeigt alle drei
+Hormon-Karten, auch wenn kein einzelnes Label "Hormone" enthält), zeigt
+"Keine Treffer." wenn nichts passt, leert sich beim erneuten Öffnen
+automatisch.
+
+**2. Neuer Salzformel-Löser (`backend/salts.py`, neuer Sidebar-Modus).**
+Kation + Anion per Dropdown auswählen, Formel wird per Kreuzregel berechnet
+(Ladungen kreuzweise als Indizes, z.B. Aluminium (+3) + Sulfat (-2) →
+Al₂(SO₄)₃) — keine PubChem-Anfrage nötig, alles aus bekannten Ionenladungen.
+15 Kationen (Alkali-/Erdalkalimetalle, Ammonium, gängige Übergangsmetalle
+mit fixer Oxidationsstufe), 18 Anionen (Halogenide, Oxid/Sulfid, Hydroxid,
+die klassischen Säurereste Nitrat/Sulfat/Phosphat/Carbonat/Acetat/Cyanid
++ deren Hydrogen-Varianten). 3D-Ansicht baut RDKit lokal aus
+Ionen-SMILES-Fragmenten zusammen (`_layout_ions`, gleiches
+Nebeneinander-Muster wie `equation.py::_layout_instances`) — **bewusst als
+lose Ionenpaare dargestellt, keine echte Kristallstruktur** (ein reales
+Salz hat ein Ionengitter aus sehr vielen Ionen), im `note`-Feld immer klar
+benannt. MMFF-Optimierung schlägt für manche Ionen (z.B. Al³⁺) mangels
+Kraftfeld-Parametern fehl — abgefangen, unoptimierte ETKDG-Koordinaten
+reichen für die Darstellung. Neue Routen `GET /api/salt-ions`,
+`POST /api/salt`.
+
+**3. Produktvorhersage im Gleichungslöser (`backend/reaction_predict.py`).**
+Tippt man nur Edukte ohne "->" ein (z.B. nur "CH4 + O2"), werden die
+Produkte automatisch hergeleitet, dann läuft dieselbe
+Ausgleichs-/Animations-Pipeline wie beim Text-Gleichungslöser
+(`equation.py` dafür refaktoriert: `build_reaction_from_species()` als
+gemeinsamer Kern, `build_equation_reaction()` ruft ihn nach dem
+Text-Parsing auf). Erkannt werden **bewusst nur vier eindeutige
+Reaktionstypen**, keine allgemeine Vorhersage:
+- Verbrennung (CxHyOz + O2 → CO2 + H2O, Sonderfälle für reinen Kohlenstoff
+  und Knallgas H2+O2 → H2O).
+- Neutralisation (Säure + Metallhydroxid/Ammoniak → Salz + ggf. Wasser —
+  Ammoniak bildet bewusst KEIN Wasser, NH3 + HCl → NH4Cl direkt, andere
+  Basen schon).
+- Metall + Säure → Salz + Wasserstoff.
+- Synthese aus zwei Elementen (Metall + Nichtmetall → Salz/Oxid/Sulfid).
+
+Reaktanten werden über die normale `chem._resolve_to_names()`-Pipeline
+aufgelöst (Name/Formel/SMILES, wie überall sonst in der App) und dann
+anhand ihrer resultierenden Summenformel klassifiziert (nicht anhand des
+eingetippten Texts) — dadurch funktionieren automatisch auch Synonyme wie
+"Salzsäure" statt "HCl", ohne eigene deutsche Namenslisten. Säuren/Basen
+sind über ihre Hill-Formel identifiziert (`ACIDS`/`BASES`-Dicts), Metalle
+für die beiden elementbasierten Regeln nur mit **eindeutiger, fixer
+Oxidationsstufe** zugelassen — **Eisen, Chrom, Blei bewusst
+ausgeschlossen**, weil ihr tatsächliches Produkt vom Reaktionspartner
+abhängt (z.B. Fe + Cl2 → FeCl3, aber Fe + S → FeS, aus dem Element allein
+nicht sicher herleitbar) — führt zu einer ehrlichen "Reaktionstyp nicht
+erkannt"-Fehlermeldung statt einer geratenen, im Zweifel falschen Antwort.
+Frontend erkennt automatisch, ob ein Pfeil in der Eingabe steht, und
+schickt an `/api/equation` oder das neue `/api/equation/predict`.
+
+**Getestet:** alle drei Features per Selbsttest-Skript + neuen
+Backend-Tests (Bibliothek-Suche ist reines Frontend, im Browser geprüft:
+Vitamin-Suche, Hormone-Kategorie-Match, "keine Treffer"). Salzformel-Löser:
+Aluminiumsulfat (Al₂(SO₄)₃, Klammer-Fall), Calciumchlorid (CaCl₂) im
+Browser bestätigt. Gleichungslöser-Vorhersage: HCl+NaOH → NaCl+Wasser (mit
+Animation) und Fe+Cl2 → korrekte Fehlermeldung, beide im Browser bestätigt.
+44 Backend-Tests grün (36 vorher + 4 Salz + 4 Vorhersage — auch
+`salts.compute()`/`build_salt()` refaktoriert, ein gemeinsamer Kern für
+Frontend-Route und Vorhersage-Modul statt doppelter Kreuzregel-Logik).
+
+**Bekannte Grenzen, offen benannt:** die Produktvorhersage deckt nur die
+vier genannten Reaktionstypen ab, alles andere (Zersetzung, Redox mit
+mehrdeutiger Oxidationsstufe, organische Reaktionsmechanismen, ...) muss
+weiterhin über die vollständige Gleichung mit "->" eingegeben werden. Der
+Salzformel-Löser hat keine 3D-Kristallstruktur (siehe oben) und keine
+Löslichkeitsregeln (jede Kation/Anion-Kombination wird berechnet, auch
+wenn das reale Salz z.B. unlöslich wäre oder in der Praxis kaum vorkommt).
+
 ## 2026-09-21 (später): Gleichungslöser — tiefgestellte Indizes per "*"-Schreibweise
 
 Niki fand die Formel-Anzeige im Gleichungslöser unbefriedigend: Zahlen standen
