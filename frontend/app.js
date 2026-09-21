@@ -9,6 +9,22 @@ function downloadScreenshot(viewer, filenameBase) {
   link.click();
 }
 
+function escapeHtml(str) {
+  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// Escape-Konvention für tiefgestellte Zahlen in Formeln: "*" direkt vor einer
+// Zahl markiert sie als Index (z.B. "CH*4" -> "CH" + tiefgestellte "4"). Wird
+// sowohl auf Nutzereingaben (Live-Vorschau) als auch auf vom Backend berechnete
+// Summenformeln (equation.py::_hill_formula) angewendet -- eine Konvention, ein
+// Formatierer. "->"/"=" werden zusätzlich als Pfeil "→" dargestellt, rein
+// kosmetisch, ändert nichts an der eigentlichen Eingabe.
+function formatSubscripts(text) {
+  return escapeHtml(text)
+    .replace(/-&gt;|=/g, "→")
+    .replace(/\*(\d+)/g, "<sub>$1</sub>");
+}
+
 const FACT_DEFS = [
   { key: "formula", label: "Summenformel", unit: "" },
   { key: "molweight", label: "Molare Masse", unit: "g/mol" },
@@ -33,6 +49,7 @@ const reactionPlayButton = document.getElementById("reaction-play");
 const reactionViewerContainer = document.getElementById("reaction-viewer");
 
 const equationInput = document.getElementById("equation-input");
+const equationPreviewEl = document.getElementById("equation-preview");
 const equationExampleButton = document.getElementById("equation-example");
 const equationSolveButton = document.getElementById("equation-solve");
 const equationViewerContainer = document.getElementById("equation-viewer");
@@ -547,12 +564,33 @@ document
   .getElementById("equation-export")
   .addEventListener("click", () => downloadScreenshot(equationViewer, "gleichung"));
 
+// Live-Vorschau: zeigt die Eingabe mit echten tiefgestellten Zahlen, sobald
+// "*" vor einer Ziffer benutzt wird (z.B. "CH*4" -> "CH" + tiefgestellte "4").
+// Rein kosmetisch -- die Eingabe selbst (equationInput.value) bleibt Rohtext,
+// "*" wird erst beim Absenden entfernt (siehe equationSolveButton-Handler).
+function updateEquationPreview() {
+  const text = equationInput.value.trim();
+  if (!text) {
+    equationPreviewEl.hidden = true;
+    equationPreviewEl.innerHTML = "";
+    return;
+  }
+  equationPreviewEl.hidden = false;
+  equationPreviewEl.innerHTML = formatSubscripts(text);
+}
+
+equationInput.addEventListener("input", updateEquationPreview);
+
 equationExampleButton.addEventListener("click", () => {
-  equationInput.value = "CH4 + O2 -> CO2 + H2O";
+  equationInput.value = "CH*4 + O*2 -> CO*2 + H*2O";
+  updateEquationPreview();
 });
 
 equationSolveButton.addEventListener("click", async () => {
-  const equation = equationInput.value.trim();
+  // "*" ist nur eine Anzeige-Konvention für tiefgestellte Zahlen (siehe
+  // formatSubscripts) -- fürs eigentliche Lösen bedeutungslos, wird entfernt,
+  // damit "CH*4" genau wie "CH4" aufgelöst wird.
+  const equation = equationInput.value.replace(/\*/g, "").trim();
   if (!equation) {
     show(errorEl, "Bitte eine Reaktionsgleichung eingeben.");
     return;
@@ -580,7 +618,10 @@ equationSolveButton.addEventListener("click", async () => {
     equationInfoEl.innerHTML = "";
     const name = document.createElement("span");
     name.className = "chemspace-info-name";
-    name.textContent = data.label;
+    name.innerHTML = formatSubscripts(data.formula_label);
+    const recognized = document.createElement("span");
+    recognized.className = "chemspace-info-detail";
+    recognized.textContent = `Erkannt als: ${data.label}`;
     const detail = document.createElement("span");
     detail.className = "chemspace-info-detail";
     detail.textContent =
@@ -588,6 +629,8 @@ equationSolveButton.addEventListener("click", async () => {
       "(nächstgelegene Zuordnung je Element), nicht chemisch exakt wie bei der " +
       "handkuratierten Reaktion oben.";
     equationInfoEl.appendChild(name);
+    equationInfoEl.appendChild(document.createElement("br"));
+    equationInfoEl.appendChild(recognized);
     equationInfoEl.appendChild(document.createElement("br"));
     equationInfoEl.appendChild(detail);
   } catch (err) {
@@ -880,7 +923,7 @@ const MODE_INTROS = {
     'Gib einen Namen, Markennamen, eine Formel oder einen SMILES-Code ein — z. B. "Mexalen" oder "CCO" — und erzeuge ein rotierbares 3D-Modell.',
   reaction: "Wähle eine vorbereitete Reaktion aus der Liste und lass sie als Animation ablaufen.",
   equation:
-    "Tippe eine unausgeglichene Reaktionsgleichung ein (z. B. CH4 + O2 -> CO2 + H2O) — sie wird automatisch ausgeglichen und animiert.",
+    'Tippe eine unausgeglichene Reaktionsgleichung ein (z. B. CH4 + O2 -> CO2 + H2O) — sie wird automatisch ausgeglichen und animiert. Tipp: ein "*" direkt vor einer Zahl zeigt sie tiefgestellt an, z. B. wird aus "CH*4" beim Tippen "CH₄" in der Vorschau darunter.',
   chemspace: "Trage mehrere Moleküle ein (ein Name pro Zeile), um eine 2D-Karte ihrer chemischen Ähnlichkeit zu erzeugen.",
   docking: "Gib eine PDB-ID und einen Liganden ein, um zu sehen, wie der Ligand in die Bindungstasche des Proteins passt.",
   dynamics: "Simuliere, wie sich ein Molekül bei Raumtemperatur bewegt — ein einfaches Kraftfeld, keine Quantenmechanik.",

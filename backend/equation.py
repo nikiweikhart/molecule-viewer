@@ -291,6 +291,33 @@ def _format_side(species_list: list[_Species], coeffs: list[int]) -> str:
     return " + ".join(parts)
 
 
+def _hill_formula(counts: Counter) -> str:
+    """Baut eine Summenformel im Hill-System (C zuerst, dann H, dann Rest
+    alphabetisch -- ohne C: alles alphabetisch). Jede Elementanzahl >1 wird mit
+    einem führenden '*' markiert (z.B. 'C*6H*12O*6') -- das ist dieselbe
+    Escape-Konvention wie im Gleichungslöser-Eingabefeld (siehe app.js
+    formatSubscripts()): das Frontend rendert '*<Zahl>' als tiefgestellte
+    Zahl, egal ob sie vom Menschen eingetippt oder hier berechnet wurde."""
+    if "C" in counts:
+        ordered = ["C"] + (["H"] if "H" in counts else [])
+        ordered += sorted(el for el in counts if el not in ("C", "H"))
+    else:
+        ordered = sorted(counts)
+    parts = []
+    for el in ordered:
+        n = counts[el]
+        parts.append(f"{el}*{n}" if n > 1 else el)
+    return "".join(parts)
+
+
+def _format_formula_side(species_list: list[_Species], coeffs: list[int]) -> str:
+    parts = []
+    for sp, n in zip(species_list, coeffs):
+        prefix = f"{n} " if n != 1 else ""
+        parts.append(f"{prefix}{_hill_formula(sp.element_counts)}")
+    return " + ".join(parts)
+
+
 def build_equation_reaction(text: str) -> dict:
     reactant_queries, product_queries = _parse_equation(text)
 
@@ -316,9 +343,14 @@ def build_equation_reaction(text: str) -> dict:
         f"{_format_side(reactant_species, reactant_coeffs)} → "
         f"{_format_side(product_species, product_coeffs)}"
     )
+    formula_label = (
+        f"{_format_formula_side(reactant_species, reactant_coeffs)} → "
+        f"{_format_formula_side(product_species, product_coeffs)}"
+    )
 
     return {
         "label": label,
+        "formula_label": formula_label,
         "start": {"atoms": start_atoms},
         "end": {"atoms": end_atoms},
         "correspondence": correspondence,

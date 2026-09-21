@@ -488,6 +488,17 @@ button:hover {
   font-size: 0.8rem;
 }
 
+.equation-preview {
+  padding: 6px 4px 0;
+  font-size: 1rem;
+  color: var(--text-dim);
+  font-family: inherit;
+}
+
+.equation-preview sub {
+  font-size: 0.7em;
+}
+
 .docking-controls {
   display: flex;
   flex-wrap: wrap;

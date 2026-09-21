@@ -139,6 +139,13 @@ def test_equation_combustion_is_balanced():
     # 1 CH4 (5 Atome inkl. H) + 2 O2 (2 Atome) = 7 Schwer+H-Atome auf beiden Seiten.
     assert len(data["start"]["atoms"]) == len(data["end"]["atoms"])
     assert "2" in data["label"]  # der Koeffizient 2 muss irgendwo auftauchen (O2 oder H2O)
+    # formula_label nutzt Summenformeln statt Stoffnamen, mit "*" vor jeder
+    # Elementanzahl >1 als Escape-Konvention fürs Frontend (formatSubscripts()).
+    assert "CH*4" in data["formula_label"]
+    assert "O*2" in data["formula_label"]
+    assert "CO*2" in data["formula_label"]
+    assert "H*2O" in data["formula_label"]
+    assert "*1" not in data["formula_label"]  # Elementanzahl 1 bleibt unmarkiert
 
 
 def test_equation_without_arrow_returns_400():

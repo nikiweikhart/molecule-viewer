@@ -1,5 +1,67 @@
 # Stand: Molekül-Viewer
 
+## 2026-09-21 (später): Gleichungslöser — tiefgestellte Indizes per "*"-Schreibweise
+
+Niki fand die Formel-Anzeige im Gleichungslöser unbefriedigend: Zahlen standen
+bisher überall "normal groß" (z.B. "CH4"), nicht als echter chemischer Index
+("CH₄"). Wunsch: eine Eingabe-Konvention, bei der ein "*" direkt vor einer
+Ziffer sie als tiefgestellt markiert (z.B. "CH*4"), plus Erklärung dazu im
+Hinweistext für Erstbesucher. Vorab per Rückfrage geklärt, wo das sichtbar
+werden soll -- Niki wollte die umfassendste Variante: sowohl eine Live-
+Vorschau beim Tippen als auch im Ergebnis nach dem Lösen.
+
+**Eine einzige Konvention für beide Stellen:** "*<Zahl>" wird durchgehend als
+tiefgestellte Zahl gerendert -- sowohl auf das, was Niki selbst eintippt, als
+auch auf die vom Backend berechnete Summenformel. Kein Sonderfall zwischen
+Nutzereingabe und Server-Antwort.
+
+- **Frontend (`frontend/app.js`):** neue Funktion `formatSubscripts()` --
+  escaped den Text (HTML-sicher, falls z.B. Namen mit `<`/`>` eingetippt
+  würden) und ersetzt danach `*<Ziffern>` durch `<sub>Ziffern</sub>`, plus
+  kosmetisch `->`/`=` durch `→`. Live-Vorschau (`#equation-preview`, neues
+  Element unter dem Eingabefeld) aktualisiert sich bei jedem `input`-Event am
+  Eingabefeld. Beim Absenden wird `*` aus dem Text entfernt, bevor er an
+  `/api/equation` geht -- die Schreibweise ist rein kosmetisch, ändert nichts
+  an der eigentlichen Gleichung ("CH*4" wird genau wie "CH4" aufgelöst).
+  "Beispiel laden" füllt jetzt "CH*4 + O*2 -> CO*2 + H*2O" statt der alten
+  Version ohne Sternchen -- demonstriert die neue Schreibweise sofort beim
+  ersten Ausprobieren.
+- **Backend (`backend/equation.py`):** neue Funktion `_hill_formula()` baut
+  aus dem schon vorhandenen `element_counts`-Counter jeder Spezies eine
+  Summenformel im Hill-System (C zuerst, dann H, dann Rest alphabetisch --
+  ohne C: alles alphabetisch), mit "*" vor jeder Elementanzahl >1 -- exakt
+  dieselbe Konvention wie im Frontend, keine Duplikation der Formatierungs-
+  Logik in zwei Sprachen nötig (Backend liefert nur den rohen "*"-Text, das
+  Rendering zu `<sub>` passiert einzig in `formatSubscripts()`). Neues Feld
+  `formula_label` in der `/api/equation`-Antwort, parallel zum bisherigen
+  `label` (Stoffnamen von PubChem, z.B. "Methane + 2 Oxygen"). Ergebnis-
+  Anzeige zeigt jetzt beides: `formula_label` (z.B. "CH₄ + 2 O₂ → CO₂ + 2
+  H₂O") als Haupttext, `label` als kleinere "Erkannt als: ..."-Zeile darunter
+  -- damit bleibt sichtbar, welcher Stoff tatsächlich erkannt wurde (wichtig
+  bei mehrdeutigen Eingaben), auch wenn die Formel jetzt im Vordergrund steht.
+- **Hinweistext ergänzt** (`MODE_INTROS.equation`): erklärt die "*"-
+  Schreibweise mit einem Beispiel, das echte Unicode-Tiefstellungszeichen
+  nutzt ("CH₄"), da der Hinweistext selbst per `textContent` gesetzt wird
+  (kein HTML-Rendering dort, aber Unicode-Zeichen funktionieren direkt ohne
+  Sonderbehandlung).
+- **Backend-Test ergänzt** (`tests/test_api.py`,
+  `test_equation_combustion_is_balanced` erweitert): prüft, dass
+  `formula_label` die erwarteten "*"-markierten Formeln enthält (`CH*4`,
+  `O*2`, `CO*2`, `H*2O`) und dass Elementanzahl 1 unmarkiert bleibt (kein
+  `*1`). Alle 32 Tests grün.
+- **Im Browser getestet** (Desktop, Live-Server neu gestartet -- Backend
+  läuft nicht mit `--reload`-Hot-Reload für neue Prozesse, ein reiner
+  Datei-Save reicht bei laufendem `--reload`-Server aber danach): "Beispiel
+  laden" gefüllt und geprüft, dass die Live-Vorschau sofort "CH₄ + O₂ → CO₂ +
+  H₂O" mit echten Tiefstellungen zeigt (nicht nur Text mit Sternchen). Nach
+  "Lösen & animieren" zeigt das Ergebnis korrekt "CH₄ + 2 O₂ → CO₂ + 2 H₂O"
+  (ausgeglichener Koeffizient "2" bleibt normal groß, nur die Formel-eigenen
+  Zahlen sind tiefgestellt) plus "Erkannt als: Methane + 2 Oxygen → Carbon
+  Dioxide + 2 Water" darunter. Zusätzlich mit zweistelligem Index getestet
+  (Glucose, "C*6H*12O*6") -- "C₆H₁₂O₆" korrekt in der Vorschau, bestätigt,
+  dass die Regex auch mehrstellige Zahlen nach "*" erfasst, nicht nur
+  Einzelziffern.
+
 ## 2026-09-21: Frontend umgebaut — Sidebar-Navigation statt einer langen Stapel-Seite
 
 Niki fand die alte Seite (alle 8 Bereiche untereinander gestapelt, von der
