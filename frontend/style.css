@@ -451,6 +451,43 @@ button:hover {
   border-color: var(--accent);
 }
 
+.salt-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.salt-controls select {
+  flex: 1 1 200px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--text);
+  padding: 13px 16px;
+  font-family: inherit;
+  font-size: 0.9rem;
+  border-radius: 8px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.salt-controls select:focus {
+  border-color: var(--accent);
+}
+
+.salt-controls button {
+  flex: 0 0 auto;
+}
+
+.salt-formula {
+  font-size: 1.6rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.salt-formula sub {
+  font-size: 0.68em;
+}
+
 .chemspace-controls {
   display: flex;
   flex-wrap: wrap;

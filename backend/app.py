@@ -16,6 +16,7 @@ from explain import explain
 from folding import BOLTZ_AVAILABLE, FoldingError, build_folding
 from peptide import PeptideError, build_peptide
 from reactions import get_reaction, list_reactions
+from salts import SaltError, build_salt, list_ions
 
 app = FastAPI()
 
@@ -78,6 +79,11 @@ class PeptideRequest(BaseModel):
 class FoldingRequest(BaseModel):
     name: str | None = None
     sequence: str | None = None
+
+
+class SaltRequest(BaseModel):
+    cation: str
+    anion: str
 
 
 @app.post("/api/resolve")
@@ -183,6 +189,19 @@ def api_fold(req: FoldingRequest):
     try:
         return build_folding(req.name, req.sequence)
     except FoldingError as e:
+        return JSONResponse(status_code=400, content={"error": str(e)})
+
+
+@app.get("/api/salt-ions")
+def api_salt_ions():
+    return list_ions()
+
+
+@app.post("/api/salt")
+def api_salt(req: SaltRequest):
+    try:
+        return build_salt(req.cation, req.anion)
+    except SaltError as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
 
 

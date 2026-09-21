@@ -64,6 +64,10 @@
           <span class="nav-icon">🧫</span>
           <span class="nav-label">Protein-Faltung (Boltz-2)</span>
         </button>
+        <button type="button" class="nav-item" data-mode="salts" title="Salzformel-Löser">
+          <span class="nav-icon">🧂</span>
+          <span class="nav-label">Salzformel-Löser</span>
+        </button>
       </div>
     </nav>
 
@@ -234,6 +238,20 @@
           <button type="button" id="folding-export" class="ghost-button export-button">PNG speichern</button>
         </div>
         <div id="folding-info" class="chemspace-info" hidden></div>
+      </section>
+
+      <section class="mode-view" data-mode-view="salts" hidden>
+        <div class="salt-controls">
+          <select id="salt-cation"></select>
+          <select id="salt-anion"></select>
+          <button type="button" id="salt-solve">Formel berechnen</button>
+        </div>
+        <div id="salt-formula" class="salt-formula" hidden></div>
+        <div class="viewer-frame">
+          <div id="salt-viewer" class="viewer"></div>
+          <button type="button" id="salt-export" class="ghost-button export-button">PNG speichern</button>
+        </div>
+        <div id="salt-info" class="chemspace-info" hidden></div>
       </section>
     </main>
   </div>

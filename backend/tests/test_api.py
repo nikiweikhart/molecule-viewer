@@ -148,6 +148,38 @@ def test_equation_combustion_is_balanced():
     assert "*1" not in data["formula_label"]  # Elementanzahl 1 bleibt unmarkiert
 
 
+def test_salt_ions_list_contains_known_entries():
+    resp = client.get("/api/salt-ions")
+    assert resp.status_code == 200
+    data = resp.json()
+    cation_keys = [c["key"] for c in data["cations"]]
+    anion_keys = [a["key"] for a in data["anions"]]
+    assert "aluminium" in cation_keys
+    assert "sulfat" in anion_keys
+
+
+def test_salt_aluminium_sulfat_is_two_to_three():
+    resp = client.post("/api/salt", json={"cation": "aluminium", "anion": "sulfat"})
+    assert resp.status_code == 200
+    data = resp.json()
+    # Al(+3) + SO4(-2) -> Kreuzregel ergibt Al2(SO4)3.
+    assert data["formula_label"].replace("*", "") == "Al2(SO4)3"
+    assert data["facts"]["formula"] == "Al2O12S3"
+
+
+def test_salt_calcium_chlorid_is_one_to_two():
+    resp = client.post("/api/salt", json={"cation": "calcium", "anion": "chlorid"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["formula_label"].replace("*", "") == "CaCl2"
+
+
+def test_salt_unknown_ion_returns_400():
+    resp = client.post("/api/salt", json={"cation": "unobtainium", "anion": "chlorid"})
+    assert resp.status_code == 400
+    assert "error" in resp.json()
+
+
 def test_equation_without_arrow_returns_400():
     resp = client.post("/api/equation", json={"equation": "CH4 + O2 CO2 + H2O"})
     assert resp.status_code == 400

@@ -905,6 +905,86 @@ foldingRunButton.addEventListener("click", async () => {
   }
 });
 
+const saltCationSelect = document.getElementById("salt-cation");
+const saltAnionSelect = document.getElementById("salt-anion");
+const saltSolveButton = document.getElementById("salt-solve");
+const saltFormulaEl = document.getElementById("salt-formula");
+const saltInfoEl = document.getElementById("salt-info");
+const saltViewerContainer = document.getElementById("salt-viewer");
+
+const saltViewer = createViewer(saltViewerContainer);
+document
+  .getElementById("salt-export")
+  .addEventListener("click", () => downloadScreenshot(saltViewer, "salz"));
+
+function populateSaltSelect(select, options) {
+  select.innerHTML = "";
+  for (const opt of options) {
+    const option = document.createElement("option");
+    option.value = opt.key;
+    option.textContent = opt.label;
+    select.appendChild(option);
+  }
+}
+
+fetch("/api/salt-ions")
+  .then((r) => r.json())
+  .then(({ cations, anions }) => {
+    populateSaltSelect(saltCationSelect, cations);
+    populateSaltSelect(saltAnionSelect, anions);
+  })
+  .catch(() => {
+    show(errorEl, "Ionen-Liste konnte nicht geladen werden.");
+  });
+
+saltSolveButton.addEventListener("click", async () => {
+  const cation = saltCationSelect.value;
+  const anion = saltAnionSelect.value;
+  if (!cation || !anion) return;
+
+  hide(errorEl);
+  saltInfoEl.hidden = false;
+  saltInfoEl.className = "chemspace-info";
+  saltInfoEl.textContent = "Wird berechnet …";
+  saltSolveButton.disabled = true;
+
+  try {
+    const response = await fetch("/api/salt", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cation, anion }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || "Unbekannter Fehler.");
+    }
+
+    saltFormulaEl.hidden = false;
+    saltFormulaEl.innerHTML = formatSubscripts(data.formula_label);
+
+    if (data.atoms.length > 0) {
+      saltViewer.setMolecule(data.atoms, data.bonds);
+    }
+
+    saltInfoEl.innerHTML = "";
+    const name = document.createElement("span");
+    name.className = "chemspace-info-name";
+    name.textContent = data.common_name;
+    const detail = document.createElement("span");
+    detail.className = "chemspace-info-detail";
+    detail.textContent = data.note;
+    saltInfoEl.appendChild(name);
+    saltInfoEl.appendChild(document.createElement("br"));
+    saltInfoEl.appendChild(detail);
+  } catch (err) {
+    saltInfoEl.hidden = true;
+    saltFormulaEl.hidden = true;
+    show(errorEl, err.message || "Unbekannter Fehler.");
+  } finally {
+    saltSolveButton.disabled = false;
+  }
+});
+
 // --- Sidebar-Navigation: ein zentrales Sichtfenster, per Klick zwischen den
 // Funktionen umschaltbar, statt alles untereinander zu stapeln. ---
 
@@ -916,6 +996,7 @@ const MODE_LABELS = {
   docking: "Protein-Docking",
   dynamics: "Molekulardynamik",
   folding: "Protein-Faltung (Boltz-2)",
+  salts: "Salzformel-Löser",
 };
 
 const MODE_INTROS = {
@@ -929,6 +1010,8 @@ const MODE_INTROS = {
   dynamics: "Simuliere, wie sich ein Molekül bei Raumtemperatur bewegt — ein einfaches Kraftfeld, keine Quantenmechanik.",
   folding:
     "Sage die 3D-Struktur eines Peptids mit einem echten ML-Modell (Boltz-2) vorher — dauert deutlich länger als die anderen Funktionen.",
+  salts:
+    "Wähle ein Kation und ein Anion — die Verhältnisformel wird per Kreuzregel berechnet (Ladungen kreuzweise als Indizes), z. B. Aluminium + Sulfat → Al₂(SO₄)₃.",
 };
 
 const LIBRARY_INTRO =
@@ -996,6 +1079,7 @@ const MODE_RESIZE = {
   docking: () => dockingViewer.resize(),
   dynamics: () => dynamicsViewer.resize(),
   folding: () => foldingViewer.resize(),
+  salts: () => saltViewer.resize(),
 };
 
 function activateMode(mode) {
