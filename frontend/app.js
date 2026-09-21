@@ -932,7 +932,7 @@ const MODE_INTROS = {
 };
 
 const LIBRARY_INTRO =
-  "Vorgefertigte Moleküle zum Ausprobieren, nach Kategorien sortiert — ein Klick lädt die Struktur direkt in die Struktur-Suche.";
+  "Vorgefertigte Moleküle zum Ausprobieren, nach Kategorien sortiert — ein Klick lädt die Struktur direkt in die Struktur-Suche. Oben tippen, um zu suchen.";
 
 // Merkt sich pro Browser, welche Erklärtexte schon einmal gesehen wurden, damit sie
 // nicht bei jedem Besuch erneut aufpoppen.
@@ -1027,11 +1027,40 @@ const libraryToggle = document.getElementById("library-toggle");
 const libraryFlyout = document.getElementById("library-flyout");
 const libraryBackdrop = document.getElementById("library-backdrop");
 const libraryCloseButton = document.getElementById("library-close");
+const librarySearchInput = document.getElementById("library-search");
+const libraryEmptyEl = document.getElementById("library-empty");
+
+// Filtert die schon gerenderten Karten/Kategorien nach Textübereinstimmung, statt
+// die Bibliothek neu aufzubauen -- eine Kategorie bleibt sichtbar, wenn entweder ihr
+// Titel oder mindestens eine ihrer Karten zur Suche passt (z.B. "Hormone" zeigt alle
+// Hormon-Karten, auch wenn kein einzelnes Label selbst "Hormone" enthält).
+function filterLibrary(query) {
+  const q = query.trim().toLowerCase();
+  let anyVisible = false;
+  for (const section of libraryEl.querySelectorAll(".library-category")) {
+    const titleEl = section.querySelector(".library-category-title");
+    const categoryMatches = !q || (titleEl && titleEl.textContent.toLowerCase().includes(q));
+    let sectionHasVisible = false;
+    for (const card of section.querySelectorAll(".library-card")) {
+      const match = categoryMatches || card.textContent.toLowerCase().includes(q);
+      card.hidden = !match;
+      if (match) sectionHasVisible = true;
+    }
+    section.hidden = !sectionHasVisible;
+    if (sectionHasVisible) anyVisible = true;
+  }
+  libraryEmptyEl.hidden = !q || anyVisible;
+}
+
+librarySearchInput.addEventListener("input", () => filterLibrary(librarySearchInput.value));
 
 function openLibraryFlyout() {
   libraryFlyout.hidden = false;
   libraryBackdrop.hidden = false;
   libraryToggle.classList.add("active");
+  librarySearchInput.value = "";
+  filterLibrary("");
+  librarySearchInput.focus();
   maybeShowIntro("library", LIBRARY_INTRO);
 }
 

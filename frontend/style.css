@@ -183,8 +183,39 @@ html, body {
 }
 
 .library-flyout .library {
-  padding: 18px 20px 28px;
+  padding: 12px 20px 28px;
   overflow-y: auto;
+}
+
+.library-search-row {
+  padding: 14px 20px 0;
+}
+
+.library-search-row input {
+  width: 100%;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--text);
+  padding: 11px 14px;
+  font-family: inherit;
+  font-size: 0.88rem;
+  border-radius: 8px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.library-search-row input::placeholder {
+  color: var(--text-faint);
+}
+
+.library-search-row input:focus {
+  border-color: var(--accent);
+}
+
+.library-empty {
+  padding: 0 20px 20px;
+  color: var(--text-faint);
+  font-size: 0.85rem;
 }
 
 .main-panel {

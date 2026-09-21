@@ -73,7 +73,16 @@
         <span>Bibliothek — zum Ausprobieren anklicken</span>
         <button type="button" id="library-close" class="flyout-close" aria-label="Schließen">✕</button>
       </div>
+      <div class="library-search-row">
+        <input
+          type="text"
+          id="library-search"
+          placeholder="Suchen — z. B. Vitamin, Insulin, Zucker …"
+          autocomplete="off"
+        />
+      </div>
       <div id="library" class="library"></div>
+      <div id="library-empty" class="library-empty" hidden>Keine Treffer.</div>
     </aside>
 
     <main class="main-panel">
