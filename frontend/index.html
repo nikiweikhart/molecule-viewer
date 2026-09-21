@@ -21,150 +21,211 @@
   </script>
 </head>
 <body>
-  <div class="page">
-    <header class="topbar">
-      <span class="brand">Molekül-Viewer</span>
-      <span class="brand-tag">Struktur-Auflösung // 3D</span>
-    </header>
-
-    <div class="section-label">Bibliothek — zum Ausprobieren anklicken</div>
-    <div id="library" class="library"></div>
-
-    <form id="query-form" class="query-row">
-      <input
-        id="query-input"
-        type="text"
-        placeholder="Name, Markenname, Formel oder SMILES — z. B. Mexalen, Aspirin, C6H12O6, CCO"
-        autocomplete="off"
-      />
-      <input
-        id="query-input-2"
-        type="text"
-        placeholder="Zweites Molekül zum Vergleich"
-        autocomplete="off"
-        hidden
-      />
-      <button type="button" id="compare-toggle" class="ghost-button">+ Vergleichen</button>
-      <button type="submit">Auflösen</button>
-    </form>
-
-    <div id="mode-row" class="mode-row">
-      <button type="button" class="mode-btn active" data-mode="ball-stick">Kugel-Stab</button>
-      <button type="button" class="mode-btn" data-mode="space-filling">Raumfüllend</button>
-      <button type="button" class="mode-btn" data-mode="charge">Ladung</button>
-    </div>
-
-    <div id="note" class="note" hidden></div>
-    <div id="error" class="error" hidden></div>
-
-    <div id="cards" class="cards"></div>
-
-    <div class="section-label">Reaktions-Animation</div>
-    <div class="reaction-row">
-      <select id="reaction-select"></select>
-      <button type="button" id="reaction-play">▶ Ablaufen lassen</button>
-    </div>
-    <div class="viewer-frame">
-      <div id="reaction-viewer" class="viewer"></div>
-      <button type="button" id="reaction-export" class="ghost-button export-button">PNG speichern</button>
-    </div>
-
-    <div class="section-label">Gleichungslöser</div>
-    <div class="docking-controls">
-      <input
-        id="equation-input"
-        type="text"
-        placeholder="Reaktionsgleichung — z. B. CH4 + O2 -> CO2 + H2O"
-        autocomplete="off"
-      />
-      <button type="button" id="equation-example" class="ghost-button">Beispiel laden</button>
-      <button type="button" id="equation-solve">Lösen &amp; animieren</button>
-    </div>
-    <div class="viewer-frame">
-      <div id="equation-viewer" class="viewer"></div>
-      <button type="button" id="equation-export" class="ghost-button export-button">PNG speichern</button>
-    </div>
-    <div id="equation-info" class="chemspace-info" hidden></div>
-
-    <div class="section-label">Chemischer Raum</div>
-    <div class="chemspace-controls">
-      <textarea
-        id="chemspace-input"
-        rows="4"
-        placeholder="Ein Molekül pro Zeile — Name, Markenname, Formel oder SMILES"
-      ></textarea>
-      <div class="chemspace-buttons">
-        <button type="button" id="chemspace-example" class="ghost-button">Beispiel-Set laden</button>
-        <button type="button" id="chemspace-build">Karte erzeugen</button>
+  <div class="app-shell">
+    <nav class="sidebar">
+      <div class="sidebar-brand">
+        <span class="brand">Molekül-Viewer</span>
+        <span class="brand-tag">Struktur-Auflösung // 3D</span>
       </div>
-    </div>
-    <div class="viewer-frame chemspace-frame">
-      <canvas id="chemspace-canvas"></canvas>
-    </div>
-    <div id="chemspace-info" class="chemspace-info" hidden></div>
 
-    <div class="section-label">Protein-Docking</div>
-    <div class="docking-controls">
-      <input
-        id="docking-pdb-input"
-        type="text"
-        placeholder="PDB-ID — z. B. 3PTB"
-        autocomplete="off"
-      />
-      <input
-        id="docking-ligand-input"
-        type="text"
-        placeholder="Ligand — Name, Markenname, Formel oder SMILES"
-        autocomplete="off"
-      />
-      <button type="button" id="docking-example" class="ghost-button">Beispiel laden</button>
-      <button type="button" id="docking-dock">Docken</button>
-    </div>
-    <div class="viewer-frame">
-      <div id="docking-viewer" class="viewer"></div>
-      <button type="button" id="docking-export" class="ghost-button export-button">PNG speichern</button>
-    </div>
-    <div id="docking-info" class="chemspace-info" hidden></div>
+      <div class="sidebar-nav">
+        <button type="button" id="library-toggle" class="nav-item nav-item-library" title="Bibliothek">
+          <span class="nav-icon">📚</span>
+          <span class="nav-label">Bibliothek</span>
+        </button>
 
-    <div class="section-label">Molekulardynamik</div>
-    <div class="docking-controls">
-      <input
-        id="dynamics-input"
-        type="text"
-        placeholder="Name, Markenname, Formel oder SMILES — z. B. caffeine, Mexalen"
-        autocomplete="off"
-      />
-      <button type="button" id="dynamics-example" class="ghost-button">Beispiel laden</button>
-      <button type="button" id="dynamics-run">Simulieren</button>
-    </div>
-    <div class="viewer-frame">
-      <div id="dynamics-viewer" class="viewer"></div>
-      <button type="button" id="dynamics-export" class="ghost-button export-button">PNG speichern</button>
-    </div>
-    <div id="dynamics-info" class="chemspace-info" hidden></div>
+        <div class="nav-divider"></div>
 
-    <div class="section-label">Protein-Struktur-Vorhersage (Boltz-2)</div>
-    <div class="chemspace-info" style="margin-bottom: 10px">
-      Echte ML-basierte Faltungsvorhersage (Boltz-2, AlphaFold3-artige Architektur) --
-      im Unterschied zur reinen Kraftfeld-Näherung oben unter "Kleine Peptide".
-      Dauert deutlich länger (typisch mehrere Minuten, siehe Hinweistext nach der
-      Berechnung) und braucht Internet für den MSA-Server.
-    </div>
-    <div class="docking-controls">
-      <input
-        id="folding-input"
-        type="text"
-        placeholder="Sequenz (Ein-Buchstaben-Code) oder Name — z. B. Oxytocin"
-        autocomplete="off"
-      />
-      <button type="button" id="folding-example" class="ghost-button">Beispiel laden</button>
-      <button type="button" id="folding-run">Vorhersagen</button>
-    </div>
-    <div class="viewer-frame">
-      <div id="folding-viewer" class="viewer"></div>
-      <button type="button" id="folding-export" class="ghost-button export-button">PNG speichern</button>
-    </div>
-    <div id="folding-info" class="chemspace-info" hidden></div>
+        <button type="button" class="nav-item active" data-mode="search" title="Struktur-Suche">
+          <span class="nav-icon">🔍</span>
+          <span class="nav-label">Struktur-Suche</span>
+        </button>
+        <button type="button" class="nav-item" data-mode="reaction" title="Reaktions-Animation">
+          <span class="nav-icon">⚗️</span>
+          <span class="nav-label">Reaktions-Animation</span>
+        </button>
+        <button type="button" class="nav-item" data-mode="equation" title="Gleichungslöser">
+          <span class="nav-icon">🧮</span>
+          <span class="nav-label">Gleichungslöser</span>
+        </button>
+        <button type="button" class="nav-item" data-mode="chemspace" title="Chemischer Raum">
+          <span class="nav-icon">🗺️</span>
+          <span class="nav-label">Chemischer Raum</span>
+        </button>
+        <button type="button" class="nav-item" data-mode="docking" title="Protein-Docking">
+          <span class="nav-icon">🧬</span>
+          <span class="nav-label">Protein-Docking</span>
+        </button>
+        <button type="button" class="nav-item" data-mode="dynamics" title="Molekulardynamik">
+          <span class="nav-icon">📈</span>
+          <span class="nav-label">Molekulardynamik</span>
+        </button>
+        <button type="button" class="nav-item" data-mode="folding" title="Protein-Faltung (Boltz-2)">
+          <span class="nav-icon">🧫</span>
+          <span class="nav-label">Protein-Faltung (Boltz-2)</span>
+        </button>
+      </div>
+    </nav>
+
+    <div id="library-backdrop" class="flyout-backdrop" hidden></div>
+    <aside id="library-flyout" class="library-flyout" hidden>
+      <div class="library-flyout-header">
+        <span>Bibliothek — zum Ausprobieren anklicken</span>
+        <button type="button" id="library-close" class="flyout-close" aria-label="Schließen">✕</button>
+      </div>
+      <div id="library" class="library"></div>
+    </aside>
+
+    <main class="main-panel">
+      <header class="main-header">
+        <h1 id="mode-title">Struktur-Suche</h1>
+      </header>
+
+      <div id="mode-intro" class="mode-intro" hidden></div>
+      <div id="note" class="note" hidden></div>
+      <div id="error" class="error" hidden></div>
+
+      <section class="mode-view" data-mode-view="search">
+        <form id="query-form" class="query-row">
+          <input
+            id="query-input"
+            type="text"
+            placeholder="Name, Markenname, Formel oder SMILES — z. B. Mexalen, Aspirin, C6H12O6, CCO"
+            autocomplete="off"
+          />
+          <input
+            id="query-input-2"
+            type="text"
+            placeholder="Zweites Molekül zum Vergleich"
+            autocomplete="off"
+            hidden
+          />
+          <button type="button" id="compare-toggle" class="ghost-button">+ Vergleichen</button>
+          <button type="submit">Auflösen</button>
+        </form>
+
+        <div id="mode-row" class="mode-row">
+          <button type="button" class="mode-btn active" data-mode="ball-stick">Kugel-Stab</button>
+          <button type="button" class="mode-btn" data-mode="space-filling">Raumfüllend</button>
+          <button type="button" class="mode-btn" data-mode="charge">Ladung</button>
+        </div>
+
+        <div id="cards" class="cards"></div>
+      </section>
+
+      <section class="mode-view" data-mode-view="reaction" hidden>
+        <div class="reaction-row">
+          <select id="reaction-select"></select>
+          <button type="button" id="reaction-play">▶ Ablaufen lassen</button>
+        </div>
+        <div class="viewer-frame">
+          <div id="reaction-viewer" class="viewer"></div>
+          <button type="button" id="reaction-export" class="ghost-button export-button">PNG speichern</button>
+        </div>
+      </section>
+
+      <section class="mode-view" data-mode-view="equation" hidden>
+        <div class="docking-controls">
+          <input
+            id="equation-input"
+            type="text"
+            placeholder="Reaktionsgleichung — z. B. CH4 + O2 -> CO2 + H2O"
+            autocomplete="off"
+          />
+          <button type="button" id="equation-example" class="ghost-button">Beispiel laden</button>
+          <button type="button" id="equation-solve">Lösen &amp; animieren</button>
+        </div>
+        <div class="viewer-frame">
+          <div id="equation-viewer" class="viewer"></div>
+          <button type="button" id="equation-export" class="ghost-button export-button">PNG speichern</button>
+        </div>
+        <div id="equation-info" class="chemspace-info" hidden></div>
+      </section>
+
+      <section class="mode-view" data-mode-view="chemspace" hidden>
+        <div class="chemspace-controls">
+          <textarea
+            id="chemspace-input"
+            rows="4"
+            placeholder="Ein Molekül pro Zeile — Name, Markenname, Formel oder SMILES"
+          ></textarea>
+          <div class="chemspace-buttons">
+            <button type="button" id="chemspace-example" class="ghost-button">Beispiel-Set laden</button>
+            <button type="button" id="chemspace-build">Karte erzeugen</button>
+          </div>
+        </div>
+        <div class="viewer-frame chemspace-frame">
+          <canvas id="chemspace-canvas"></canvas>
+        </div>
+        <div id="chemspace-info" class="chemspace-info" hidden></div>
+      </section>
+
+      <section class="mode-view" data-mode-view="docking" hidden>
+        <div class="docking-controls">
+          <input
+            id="docking-pdb-input"
+            type="text"
+            placeholder="PDB-ID — z. B. 3PTB"
+            autocomplete="off"
+          />
+          <input
+            id="docking-ligand-input"
+            type="text"
+            placeholder="Ligand — Name, Markenname, Formel oder SMILES"
+            autocomplete="off"
+          />
+          <button type="button" id="docking-example" class="ghost-button">Beispiel laden</button>
+          <button type="button" id="docking-dock">Docken</button>
+        </div>
+        <div class="viewer-frame">
+          <div id="docking-viewer" class="viewer"></div>
+          <button type="button" id="docking-export" class="ghost-button export-button">PNG speichern</button>
+        </div>
+        <div id="docking-info" class="chemspace-info" hidden></div>
+      </section>
+
+      <section class="mode-view" data-mode-view="dynamics" hidden>
+        <div class="docking-controls">
+          <input
+            id="dynamics-input"
+            type="text"
+            placeholder="Name, Markenname, Formel oder SMILES — z. B. caffeine, Mexalen"
+            autocomplete="off"
+          />
+          <button type="button" id="dynamics-example" class="ghost-button">Beispiel laden</button>
+          <button type="button" id="dynamics-run">Simulieren</button>
+        </div>
+        <div class="viewer-frame">
+          <div id="dynamics-viewer" class="viewer"></div>
+          <button type="button" id="dynamics-export" class="ghost-button export-button">PNG speichern</button>
+        </div>
+        <div id="dynamics-info" class="chemspace-info" hidden></div>
+      </section>
+
+      <section class="mode-view" data-mode-view="folding" hidden>
+        <div class="chemspace-info" style="margin-bottom: 10px">
+          Echte ML-basierte Faltungsvorhersage (Boltz-2, AlphaFold3-artige Architektur) --
+          im Unterschied zur reinen Kraftfeld-Näherung unter "Kleine Peptide" in der Bibliothek.
+          Dauert deutlich länger (typisch mehrere Minuten, siehe Hinweistext nach der
+          Berechnung) und braucht Internet für den MSA-Server.
+        </div>
+        <div class="docking-controls">
+          <input
+            id="folding-input"
+            type="text"
+            placeholder="Sequenz (Ein-Buchstaben-Code) oder Name — z. B. Oxytocin"
+            autocomplete="off"
+          />
+          <button type="button" id="folding-example" class="ghost-button">Beispiel laden</button>
+          <button type="button" id="folding-run">Vorhersagen</button>
+        </div>
+        <div class="viewer-frame">
+          <div id="folding-viewer" class="viewer"></div>
+          <button type="button" id="folding-export" class="ghost-button export-button">PNG speichern</button>
+        </div>
+        <div id="folding-info" class="chemspace-info" hidden></div>
+      </section>
+    </main>
   </div>
 
   <template id="card-template">

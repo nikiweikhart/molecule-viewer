@@ -367,6 +367,7 @@ function createLibraryCard(item) {
         ? await loadPeptideIntoSlot(0, item.peptideName, null)
         : await loadIntoSlot(0, item.query);
       if (data.note) show(noteEl, data.note);
+      activateMode("search");
       cardsEl.scrollIntoView({ behavior: "smooth", block: "start" });
     } catch (err) {
       show(errorEl, err.message || "Unbekannter Fehler.");
@@ -401,6 +402,7 @@ function createPeptideSequenceRow() {
     try {
       const data = await loadPeptideIntoSlot(0, null, sequence);
       if (data.note) show(noteEl, data.note);
+      activateMode("search");
       cardsEl.scrollIntoView({ behavior: "smooth", block: "start" });
     } catch (err) {
       show(errorEl, err.message || "Unbekannter Fehler.");
@@ -625,6 +627,7 @@ chemspacePlot.setOnSelect(async (point) => {
   formatChemspaceInfo(point);
   try {
     await loadIntoSlot(0, point.smiles);
+    activateMode("search");
     cardsEl.scrollIntoView({ behavior: "smooth", block: "start" });
   } catch (err) {
     show(errorEl, err.message || "Unbekannter Fehler.");
@@ -858,3 +861,149 @@ foldingRunButton.addEventListener("click", async () => {
     foldingRunButton.disabled = false;
   }
 });
+
+// --- Sidebar-Navigation: ein zentrales Sichtfenster, per Klick zwischen den
+// Funktionen umschaltbar, statt alles untereinander zu stapeln. ---
+
+const MODE_LABELS = {
+  search: "Struktur-Suche",
+  reaction: "Reaktions-Animation",
+  equation: "Gleichungslöser",
+  chemspace: "Chemischer Raum",
+  docking: "Protein-Docking",
+  dynamics: "Molekulardynamik",
+  folding: "Protein-Faltung (Boltz-2)",
+};
+
+const MODE_INTROS = {
+  search:
+    'Gib einen Namen, Markennamen, eine Formel oder einen SMILES-Code ein — z. B. "Mexalen" oder "CCO" — und erzeuge ein rotierbares 3D-Modell.',
+  reaction: "Wähle eine vorbereitete Reaktion aus der Liste und lass sie als Animation ablaufen.",
+  equation:
+    "Tippe eine unausgeglichene Reaktionsgleichung ein (z. B. CH4 + O2 -> CO2 + H2O) — sie wird automatisch ausgeglichen und animiert.",
+  chemspace: "Trage mehrere Moleküle ein (ein Name pro Zeile), um eine 2D-Karte ihrer chemischen Ähnlichkeit zu erzeugen.",
+  docking: "Gib eine PDB-ID und einen Liganden ein, um zu sehen, wie der Ligand in die Bindungstasche des Proteins passt.",
+  dynamics: "Simuliere, wie sich ein Molekül bei Raumtemperatur bewegt — ein einfaches Kraftfeld, keine Quantenmechanik.",
+  folding:
+    "Sage die 3D-Struktur eines Peptids mit einem echten ML-Modell (Boltz-2) vorher — dauert deutlich länger als die anderen Funktionen.",
+};
+
+const LIBRARY_INTRO =
+  "Vorgefertigte Moleküle zum Ausprobieren, nach Kategorien sortiert — ein Klick lädt die Struktur direkt in die Struktur-Suche.";
+
+// Merkt sich pro Browser, welche Erklärtexte schon einmal gesehen wurden, damit sie
+// nicht bei jedem Besuch erneut aufpoppen.
+const INTRO_SEEN_KEY = "mv_seen_intros";
+
+function getSeenIntros() {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(INTRO_SEEN_KEY) || "[]"));
+  } catch {
+    return new Set();
+  }
+}
+
+function markIntroSeen(key) {
+  try {
+    const seen = getSeenIntros();
+    seen.add(key);
+    localStorage.setItem(INTRO_SEEN_KEY, JSON.stringify([...seen]));
+  } catch {
+    // localStorage kann z.B. in privaten Fenstern fehlschlagen -- dann bleibt der
+    // Hinweistext einfach jedes Mal sichtbar, kein Absturz.
+  }
+}
+
+const modeIntroEl = document.getElementById("mode-intro");
+
+function maybeShowIntro(key, text) {
+  if (getSeenIntros().has(key)) {
+    modeIntroEl.hidden = true;
+    return;
+  }
+  modeIntroEl.innerHTML = "";
+  const span = document.createElement("span");
+  span.textContent = text;
+  const closeButton = document.createElement("button");
+  closeButton.type = "button";
+  closeButton.className = "intro-close";
+  closeButton.textContent = "Verstanden";
+  closeButton.addEventListener("click", () => {
+    modeIntroEl.hidden = true;
+    markIntroSeen(key);
+  });
+  modeIntroEl.appendChild(span);
+  modeIntroEl.appendChild(closeButton);
+  modeIntroEl.hidden = false;
+}
+
+const modeTitleEl = document.getElementById("mode-title");
+const navModeButtons = document.querySelectorAll(".nav-item[data-mode]");
+const modeViews = document.querySelectorAll(".mode-view[data-mode-view]");
+
+// Viewer-Container haben Größe 0, solange ihr Panel per [hidden] versteckt ist --
+// beim Sichtbarmachen einmal neu einpassen, sonst bleibt die Szene verzerrt/winzig.
+const MODE_RESIZE = {
+  search: () => {
+    for (const slot of slots) if (slot) slot.viewer.resize();
+  },
+  reaction: () => reactionViewer.resize(),
+  equation: () => equationViewer.resize(),
+  chemspace: () => chemspacePlot.resize(),
+  docking: () => dockingViewer.resize(),
+  dynamics: () => dynamicsViewer.resize(),
+  folding: () => foldingViewer.resize(),
+};
+
+function activateMode(mode) {
+  for (const view of modeViews) {
+    view.hidden = view.dataset.modeView !== mode;
+  }
+  for (const btn of navModeButtons) {
+    btn.classList.toggle("active", btn.dataset.mode === mode);
+  }
+  modeTitleEl.textContent = MODE_LABELS[mode];
+  closeLibraryFlyout();
+  maybeShowIntro(`mode:${mode}`, MODE_INTROS[mode]);
+
+  requestAnimationFrame(() => {
+    const resize = MODE_RESIZE[mode];
+    if (resize) resize();
+  });
+}
+
+for (const btn of navModeButtons) {
+  btn.addEventListener("click", () => activateMode(btn.dataset.mode));
+}
+
+// --- Bibliothek: klappt links als eigenes Fenster auf (statt den Hauptbereich zu
+// ersetzen), Klick auf eine Karte lädt die Struktur in die Struktur-Suche. ---
+
+const libraryToggle = document.getElementById("library-toggle");
+const libraryFlyout = document.getElementById("library-flyout");
+const libraryBackdrop = document.getElementById("library-backdrop");
+const libraryCloseButton = document.getElementById("library-close");
+
+function openLibraryFlyout() {
+  libraryFlyout.hidden = false;
+  libraryBackdrop.hidden = false;
+  libraryToggle.classList.add("active");
+  maybeShowIntro("library", LIBRARY_INTRO);
+}
+
+function closeLibraryFlyout() {
+  libraryFlyout.hidden = true;
+  libraryBackdrop.hidden = true;
+  libraryToggle.classList.remove("active");
+}
+
+libraryToggle.addEventListener("click", () => {
+  if (libraryFlyout.hidden) openLibraryFlyout();
+  else closeLibraryFlyout();
+});
+libraryCloseButton.addEventListener("click", closeLibraryFlyout);
+libraryBackdrop.addEventListener("click", closeLibraryFlyout);
+
+// Startzustand: Struktur-Suche ist aktiv und zeigt bei einem neuen Besuch ihren
+// eigenen Erklärtext.
+activateMode("search");

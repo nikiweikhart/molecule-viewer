@@ -1,5 +1,75 @@
 # Stand: Molekül-Viewer
 
+## 2026-09-21: Frontend umgebaut — Sidebar-Navigation statt einer langen Stapel-Seite
+
+Niki fand die alte Seite (alle 8 Bereiche untereinander gestapelt, von der
+Suche bis zur Boltz-2-Faltung) unübersichtlich und wünschte sich ein
+Cloud-artiges Layout (gemeint: die Struktur von claude.ai — Seitenleiste mit
+Funktionen + ein zentrales Fenster, NICHT claude.ais eigene visuelle
+Elemente wie die "Vorgeschlagen"-Chips, die er ausdrücklich hässlich fand).
+Rein strukturelle Übernahme, keine optische.
+
+**Neues Layout (`frontend/index.html`, `frontend/style.css`):**
+- Linke Seitenleiste (`sidebar`, 240px, auf Mobile eine horizontale
+  Icon-Leiste) mit einem Eintrag pro Funktion: Struktur-Suche,
+  Reaktions-Animation, Gleichungslöser, Chemischer Raum, Protein-Docking,
+  Molekulardynamik, Protein-Faltung (Boltz-2) — plus "Bibliothek" separat
+  oben.
+- **Nur ein zentrales Fenster** (`main-panel`) zeigt jeweils den aktiven
+  Bereich (`.mode-view[data-mode-view]`, alle anderen `[hidden]`) — vorher
+  standen alle 8 Bereiche permanent untereinander.
+- **Bibliothek klappt links als eigenes Fenster auf** (`#library-flyout`,
+  `position: fixed`, neben der Seitenleiste, mit Backdrop zum Schließen),
+  statt ein eigener Modus zu sein — genau wie von Niki beschrieben ("soll
+  links aufpoppen"). Kartendesign/-inhalt selbst unverändert übernommen
+  (bewusst, Niki wollte das Bibliothek-Design behalten). Klick auf eine
+  Karte lädt die Struktur, schließt die Bibliothek automatisch und
+  schaltet auf "Struktur-Suche" um.
+- Alle IDs/Elemente innerhalb der Bereiche unverändert gelassen (nur in
+  `<section class="mode-view" data-mode-view="...">`-Wrapper verpackt) --
+  `app.js` brauchte dadurch nur eine neue Schicht am Ende (Umschalt-Logik),
+  keine Änderungen an der bestehenden Fetch-/Render-Logik jedes Bereichs.
+- **Stolperstein gelöst:** Three.js-Viewer (und der Chemischer-Raum-Canvas)
+  lesen ihre Größe beim Erzeugen aus `container.clientWidth/Height` — bei
+  `[hidden]`-Panels ist das 0, wodurch ein Viewer, der nicht der
+  Start-Modus ist, verzerrt/leer bliebe. Gelöst mit `MODE_RESIZE` in
+  `app.js`: bei jedem Moduswechsel wird auf `requestAnimationFrame` der
+  passende `viewer.resize()`/`chemspacePlot.resize()` nachgeholt. Per
+  echtem Test bestätigt (Reaktions-Animation nach Umschalten korrekt
+  sichtbar und animiert, nicht leer).
+- `#note`/`#error` liegen jetzt einmalig im `main-header`-Bereich (statt
+  Teil der alten "Struktur-Suche"-Sektion) -- sie werden von praktisch
+  jedem Bereich befüllt (Docking, Chemischer Raum, Bibliothek, ...), waren
+  vorher aber nur direkt unter der Suche sichtbar; jetzt sind sie unabhängig
+  vom aktiven Modus sichtbar.
+
+**Erklärhilfen für Erstbesucher (Nikis zweiter Wunsch in derselben
+Nachricht):** jeder Modus (plus die Bibliothek) hat einen kurzen
+Hinweistext, der nur erscheint, bis er einmal mit "Verstanden" weggeklickt
+wurde (`localStorage`-Key `mv_seen_intros`, `app.js`: `maybeShowIntro()`).
+Kein Server-Zustand, rein browserlokal -- bei geleertem `localStorage` oder
+einem neuen Gerät erscheinen die Hinweise erneut, das ist gewollt (dann ist
+es wieder ein "Erstbesuch").
+
+**Getestet im Browser (Desktop 1024px + Mobile-Emulation 375px):**
+Moduswechsel zwischen allen 7 Bereichen (Titel/aktiver Sidebar-Eintrag/
+Hinweistext wechseln korrekt), Bibliothek-Flyout öffnet/schließt per Klick
+auf den Eintrag, per X-Button und per Klick auf den Hintergrund
+(`elementFromPoint`-Check bestätigt korrekte Stapelreihenfolge: Flyout über
+Backdrop über Hauptbereich), Klick auf eine Bibliothek-Karte (Aspirin)
+schließt die Bibliothek automatisch, schaltet auf Struktur-Suche um und
+zeigt die geladene 3D-Struktur samt Fakten-Panel korrekt. Reaktions-
+Animation nach Moduswechsel abgespielt -- sichtbar animiert, nicht leer/
+verzerrt (bestätigt den Resize-Fix). "Verstanden" auf den Hinweistext
+geklickt, Seite neu geladen -- Hinweistext blieb korrekt weg
+(`localStorage`-Persistenz bestätigt). Mobile-Ansicht (375px): Seitenleiste
+wird zur horizontalen Icon-Leiste oben, scrollbar, aktiver Eintrag farblich
+hervorgehoben, restliches Layout bleibt nutzbar.
+
+**Nicht angetastet:** `viewer.js`, `chemspace.js`, das gesamte Backend --
+reine Frontend-Strukturänderung, keine neue Route, kein geändertes
+API-Verhalten.
+
 ## 2026-09-20 (später, mehrstündiger Durchlauf): Öffentliches Deployment — jetzt live
 
 **Live-URL: https://molecule-viewer.onrender.com** (Render, kostenloser Free-Tier).
