@@ -49,13 +49,14 @@ _UNAVAILABLE_MESSAGE = (
     "lokaler GPU -- auf dieser öffentlichen Instanz nicht verfügbar."
 )
 
-# Empirisch getestet auf dieser Hardware (siehe docs/stand.md, 2026-09-20):
-# 36 Reste ~50s, 50 Reste ~73s -- deutlich unter TIMEOUT_SECONDS, Skalierung
-# mit der Länge ist spürbar überlinear, aber nicht explosionsartig. 50 bleibt
-# als Grenze stehen, weil eine Fortsetzung dieses Trends (statt linear
-# extrapoliert) bei deutlich längeren Sequenzen an das 600s-Zeitbudget
-# herankommen könnte -- konservativ statt bis an den Rand ausgereizt.
-MAX_RESIDUES = 50
+# Empirisch gemessen auf der RX 7900 XTX (siehe docs/stand.md, 2026-10-06):
+# 9/26/46/76/129/238 Reste brauchten alle 50-63s Gesamtzeit -- die Laufzeit wird
+# von Prozessstart, Gewichte-Laden und MSA-Server dominiert, nicht von der
+# Sequenzlänge. VRAM-Spitze des Boltz-Prozesses 2,7 GB (<=46 Reste) bis ~5 GB
+# (76-238 Reste), weit unter den 24 GB der Karte. 250 = knapp über der
+# längsten end-to-end im Browser geprüften Sequenz (GFP, 238 Reste, ~1900
+# Atome) -- darüber wurde weder Laufzeit noch Darstellung getestet.
+MAX_RESIDUES = 250
 
 _ONE_LETTER_CODES = set("ACDEFGHIKLMNPQRSTVWY")
 
@@ -170,7 +171,7 @@ def build_folding(name: str | None = None, sequence: str | None = None) -> dict:
         raise FoldingError(
             f"Sequenz hat {len(seq)} Reste -- diese Ausbaustufe ist auf "
             f"{MAX_RESIDUES} begrenzt (siehe docs/stand.md: oberhalb dieser Länge "
-            "wurde die Laufzeit auf dieser Hardware noch nicht geprüft)."
+            "wurden Laufzeit und Darstellung auf dieser Hardware noch nicht geprüft)."
         )
 
     with tempfile.TemporaryDirectory(prefix="boltz_") as tmp:

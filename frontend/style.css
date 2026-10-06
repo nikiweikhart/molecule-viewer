@@ -544,6 +544,9 @@ button:hover {
   border-radius: 8px;
   font-size: 0.85rem;
   line-height: 1.5;
+  /* Lange Boltz-2-Sequenzen (bis 250 Buchstaben ohne Leerzeichen) sind der
+     Anzeigename -- ohne Umbruch laufen sie rechts aus dem Kasten. */
+  overflow-wrap: anywhere;
 }
 
 .chemspace-info .chemspace-info-name {

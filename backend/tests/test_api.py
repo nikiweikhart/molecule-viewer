@@ -388,9 +388,9 @@ def test_fold_oxytocin_by_curated_name():
 def test_fold_too_long_sequence_returns_400():
     # Längenprüfung passiert vor dem Boltz-Subprocess-Start -- läuft daher auch
     # ohne .venv-boltz und ohne GPU/Internet, keine Slow-/Skip-Markierung nötig.
-    resp = client.post("/api/fold", json={"sequence": "A" * 51})
+    resp = client.post("/api/fold", json={"sequence": "A" * 251})
     assert resp.status_code == 400
-    assert "51" in resp.json()["error"]
+    assert "251" in resp.json()["error"]
 
 
 def test_fold_neither_name_nor_sequence_returns_400():

@@ -188,6 +188,10 @@ export function createViewer(container) {
     camera.far = distance * 20;
     camera.updateProjectionMatrix();
 
+    // Zoom-Grenze mitskalieren: das feste maxDistance (60) würde controls.update()
+    // bei größeren Strukturen (ab ~15 Å Radius, z.B. Boltz-2-Faltungen ab ~40
+    // Resten) auf 60 zurückziehen und das Molekül am Rand abschneiden.
+    controls.maxDistance = Math.max(60, distance * 3);
     controls.target.copy(sphere.center);
     controls.update();
 

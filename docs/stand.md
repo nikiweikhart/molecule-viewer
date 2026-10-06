@@ -1,5 +1,90 @@
 # Stand: Molekül-Viewer
 
+## 2026-10-06: Boltz-2-Darstellung erneut end-to-end bestätigt, Limit 50 → 250 Reste, zwei Viewer-Fixes
+
+Auftrag von Niki: Boltz-2-Faltung im sichtbaren Browser mit Screenshot und
+fehlerfreier Konsole nachweisen, `MAX_RESIDUES` empirisch testen (Laufzeit
+**und VRAM**), Limit falls nötig anpassen. Die visuelle Bestätigung und
+eine erste Laufzeitmessung gab es schon am 2026-09-20 (siehe unten), aber
+noch keine VRAM-Messung, und seitdem wurde das Frontend auf die Sidebar
+umgebaut. Deshalb heute frisch nachgewiesen.
+
+**Darstellung: funktioniert, mit Screenshots belegt (`docs/screenshots/`).**
+Alle Läufe über die normale Oberfläche (Sidebar → „Protein-Faltung
+(Boltz-2)“ → Sequenz eintippen → „Vorhersagen“), Konsole nach jedem Lauf
+komplett leer (keine Fehler, keine Warnungen). Zusätzlich die Rohdaten aus
+der `/api/fold`-Antwort im Browser geprüft (Fetch-Hook): keine NaN-Werte,
+keine isolierten Atome, Bindungslängen plausibel. Atomzahlen und
+Summenformeln passen exakt zu den echten Proteinen (Boltz' CIF lässt nur
+das C-terminale OXT weg, daher jeweils ein O weniger):
+- `boltz2-oxytocin.jpg`: Oxytocin (9 AS), Ring mit sichtbarer
+  Disulfidbrücke (gelbe S-Atome) und Schwanz.
+- `boltz2-melittin-26.jpg`: Melittin (26 AS), 200 Atome, C131N38O31,
+  202 Bindungen (= 199 Kette + 3 Ringschlüsse Trp/Pro), längliche
+  helikale Form.
+- `boltz2-crambin-46.jpg`: Crambin (46 AS, PDB 1CRN), 326 Atome,
+  C202N55O63S6, **alle 3 Disulfidbrücken** korrekt erkannt, 336 Bindungen
+  (= 325 + 3 SS + 8 Ringe), kompakt-globulär.
+- `boltz2-gfp-238.jpg`: GFP (238 AS), 1895 Atome. Die Szene läuft mit
+  ~62 fps, das Rendering ist also kein Engpass.
+
+**Messwerte (RX 7900 XTX, ROCm; Gesamtzeit inkl. Prozessstart,
+Gewichte-Laden und MSA-Server; VRAM = Spitze des Boltz-Prozesses laut
+Windows-GPU-Leistungsindikator, Sampling ca. alle 1,5 s, kurze Spitzen
+können also etwas höher liegen):**
+
+| Sequenz | Reste | Zeit | VRAM-Spitze | pLDDT / pTM |
+|---|---|---|---|---|
+| Oxytocin | 9 | 63 s (erster, kalter Lauf) | 2,7 GB | 88 / 0,15 |
+| Melittin | 26 | 51 s | 2,7 GB | 93 / 0,52 |
+| Crambin | 46 | 50 s | 2,7 GB | 95 / 0,87 |
+| Ubiquitin | 76 | 52 s | 4,6 GB | 94 / 0,92 |
+| Lysozym (Hühnerei) | 129 | 53 s | 5,2 GB | 98 / 0,96 |
+| GFP | 238 | 57-58 s | 4,1-5,2 GB | 95 / 0,93 |
+
+Kernbefund: **Die Laufzeit hängt bis 238 Reste praktisch nicht von der
+Länge ab.** Die eigentliche GPU-Phase dauert nur ~15 s, der Rest ist
+Overhead. Der VRAM bleibt weit unter den 24 GB der Karte. Die
+Messung vom 2026-09-20 („50 Reste ~73 s, überlinear“) ließ sich nicht
+bestätigen; vermutlich war damals der MSA-Server langsamer, die Daten von
+damals sind nicht mehr vorhanden. Ubiquitin/Lysozym/GFP liefen über ein
+Benchmark-Skript direkt gegen `folding.build_folding()` (Limit
+vorübergehend umgangen), GFP danach mit neuem Limit nochmal echt über die UI.
+
+**`MAX_RESIDUES` 50 → 250** (`folding.py`, Kommentar mit den Messwerten).
+250 = knapp über der längsten Sequenz, die end-to-end inklusive Darstellung
+geprüft wurde (GFP). Mehr wäre von Laufzeit und VRAM her wohl möglich, ist
+aber nicht getestet, daher bewusst nicht weiter. Fehlermeldung und
+`test_fold_too_long_sequence_returns_400` (jetzt 251 Reste) angepasst.
+
+**Zwei Viewer-Bugs dabei gefunden und behoben:**
+1. **Kamera-Zoom-Grenze schnitt größere Strukturen ab** (`viewer.js`,
+   `frameBox()`). `frameBox()` berechnet den passenden Kameraabstand
+   (~3,95 × Radius bei 40° FOV), aber `controls.maxDistance = 60` war fest,
+   und `controls.update()` zog die Kamera damit ab ~15 Å Radius wieder auf
+   60 heran. Ab ~40 Resten wird das Molekül so zu nah gezeigt, bei
+   GFP-Größe wäre es abgeschnitten gewesen, und man konnte auch per Mausrad
+   nicht weiter herauszoomen. Fix: `maxDistance` skaliert jetzt mit
+   (`Math.max(60, distance * 3)`). Kleine Moleküle sind unverändert
+   (Regressionscheck mit Aspirin). Docking/Reaktionen nutzen dieselbe
+   Funktion und profitieren mit. Nebeneffekt: mittelgroße Faltungen (Melittin,
+   Crambin) wirken jetzt kleiner als vorher, weil die Bounding-Sphere der
+   Box großzügig ist. Per Mausrad lässt sich heranzoomen.
+2. **Lange Sequenzen liefen aus dem Info-Kasten** (`style.css`,
+   `.chemspace-info`): der Anzeigename ist die rohe Sequenz ohne
+   Leerzeichen. Fix: `overflow-wrap: anywhere`.
+
+**Sichtbarkeit des Browser-Panes, für künftige Sichtprüfungen:** Das Pane
+war in dieser Session laut `tabs_context` die ganze Zeit „hidden“. Direkt
+nach dem Öffnen lief `requestAnimationFrame` trotzdem (145 fps), später
+lieferte es 0 Frames, bis ein Screenshot einen echten Frame anstieß (danach
+wieder ~62 fps). Das ist die bekannte Pane-Drosselung, kein App-Fehler. Die
+Screenshots sind echte gerenderte Frames. **Wer live zusehen will: im
+Claude-Desktop-App Strg+Shift+B drücken.**
+
+**Getestet:** 4 Browser-Läufe über die UI + 3 Benchmark-Läufe, alle 45
+Backend-Tests grün (inkl. echtem Boltz-Lauf), Aspirin-Regressionscheck.
+
 ## 2026-09-21 (parallel, autonomer Lasttest-Durchlauf): ~1000 Alltagsbegriffe durchgetestet, drei systemische Ursachen statt Einzelpatches behoben
 
 Niki wollte keine Einzelfall-Fixes, sondern wissen, ob ~1000 der
@@ -1930,7 +2015,9 @@ wackelndes Molekül zeigen. **Ganz unten neu: "Protein-Struktur-Vorhersage
 (Boltz-2)"** — "Beispiel laden" (füllt "Oxytocin") + "Vorhersagen", dauert
 diesmal wirklich ~30-60s (echter GPU-Rechenlauf + MSA-Server-Aufruf, siehe
 Eintrag vom 2026-09-20 oben). 3D-Rendering per Screenshot bestätigt
-(kompakte, sichtbar gefaltete Peptidstruktur).
+(kompakte, sichtbar gefaltete Peptidstruktur), zuletzt am 2026-10-06 bis
+238 Reste (GFP); Limit jetzt 250 Reste, ~50-60 s unabhängig von der Länge,
+siehe Eintrag ganz oben.
 
 Falls die venv fehlt oder kaputt ist: `python -m venv .venv` im `backend`-
 Ordner, dann `./.venv/Scripts/python.exe -m pip install -r requirements.txt`
