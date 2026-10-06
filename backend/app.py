@@ -67,6 +67,9 @@ class PdbLigandRequest(BaseModel):
 
 class DynamicsRequest(BaseModel):
     query: str
+    # Standard: X-H-Bindungen festhalten (RATTLE), 800 fs. False = freie
+    # Wasserstoff-Schwingungen, 80 fs (siehe dynamics.py).
+    constraints: bool = True
 
 
 class EquationRequest(BaseModel):
@@ -169,7 +172,7 @@ def api_pdb_ligand(req: PdbLigandRequest):
 @app.post("/api/dynamics")
 def api_dynamics(req: DynamicsRequest):
     try:
-        return run_md(req.query)
+        return run_md(req.query, constraints=req.constraints)
     except ResolveError as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
 

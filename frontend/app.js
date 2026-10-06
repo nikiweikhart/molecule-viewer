@@ -168,6 +168,7 @@ const dockingDockButton = document.getElementById("docking-dock");
 const dockingViewerContainer = document.getElementById("docking-viewer");
 const dockingInfoEl = document.getElementById("docking-info");
 const dockingProtonateInput = document.getElementById("docking-protonate");
+const dynamicsHydrogenInput = document.getElementById("dynamics-hydrogen-vibrations");
 
 // Zahl mit Komma statt Punkt und echtem Minuszeichen, z.B. "−6,1 kcal/mol".
 function formatKcal(value) {
@@ -855,7 +856,7 @@ dynamicsRunButton.addEventListener("click", async () => {
     const response = await fetch("/api/dynamics", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query }),
+      body: JSON.stringify({ query, constraints: !dynamicsHydrogenInput.checked }),
     });
     const data = await response.json();
     if (!response.ok) {
@@ -864,16 +865,30 @@ dynamicsRunButton.addEventListener("click", async () => {
 
     dynamicsViewer.playTrajectory(data);
 
+    const simulated = `${String(data.fs_simulated).replace(".", ",")} Femtosekunden`;
     dynamicsInfoEl.innerHTML = "";
     const name = document.createElement("span");
     name.className = "chemspace-info-name";
     name.textContent = query;
     const detail = document.createElement("span");
     detail.className = "chemspace-info-detail";
-    detail.textContent = `${data.temperature} K · ${data.fs_simulated} fs simuliert · ${data.elements.length} Atome`;
+    detail.textContent = data.constraints
+      ? `So bewegt sich das Molekül bei Raumtemperatur — ${simulated}, stark verlangsamt.`
+      : `Die schnellen Wasserstoff-Schwingungen bei Raumtemperatur — ${simulated}, stark verlangsamt.`;
     dynamicsInfoEl.appendChild(name);
     dynamicsInfoEl.appendChild(document.createElement("br"));
     dynamicsInfoEl.appendChild(detail);
+    dynamicsInfoEl.appendChild(
+      createDetails([
+        `${data.temperature} K, ${data.elements.length} Atome, ${data.steps_simulated} Rechenschritte.`,
+        "Echte Bewegungsgleichungen mit dem Kraftfeld MMFF94 (Velocity-Verlet, Berendsen-Thermostat).",
+        data.constraints
+          ? "Bindungen zu Wasserstoff werden auf fester Länge gehalten (RATTLE). Dadurch sind größere " +
+            "Zeitschritte möglich und man sieht die langsameren Bewegungen wie Drehungen und Biegungen."
+          : "Alle Bindungen schwingen frei — dafür sind sehr kleine Zeitschritte nötig, " +
+            "deshalb nur ein kurzer Ausschnitt.",
+      ])
+    );
   } catch (err) {
     dynamicsInfoEl.hidden = true;
     show(errorEl, err.message || "Unbekannter Fehler.");

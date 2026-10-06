@@ -478,3 +478,51 @@ def test_request_with_retry_gives_up_after_persistent_429(monkeypatch):
     monkeypatch.setattr(chem, "_RETRY_BACKOFF_S", 0.01)
     with pytest.raises(chem.ResolveError):
         chem._request_with_retry(fake_get, "https://example.invalid")
+
+
+# --- Molekulardynamik -------------------------------------------------------
+
+def test_md_conserves_energy_without_thermostat():
+    # Regressionstest für den RDKit-Fallstrick (dynamics.py-Docstring): CalcGrad(pos)
+    # ohne vorheriges CalcEnergy(pos) rechnet mit veralteten Abständen -- damals
+    # stieg die Gesamtenergie in 5 fs um ~10 kcal/mol, egal wie klein der Zeitschritt.
+    import numpy as np
+    from rdkit import Chem
+
+    import dynamics
+
+    mol = dynamics._embed_and_optimize("CCO")
+    for constraints_on, dt in ((False, 0.1), (True, 1.0)):
+        result = dynamics.simulate(
+            Chem.Mol(mol), constraints_on=constraints_on, dt_fs=dt,
+            n_steps=int(200 / dt), record_every=5, thermostat=False,
+        )
+        energies = np.array(result["energies"])
+        assert abs(energies[-1] - energies[0]) < 0.2, constraints_on
+
+
+def test_md_rattle_keeps_hydrogen_bond_lengths():
+    import numpy as np
+    from rdkit import Chem
+
+    import dynamics
+
+    mol = dynamics._embed_and_optimize("CCO")
+    start = np.array(mol.GetConformer().GetPositions())
+    constraints = dynamics._hydrogen_bond_constraints(mol, start)
+    result = dynamics.simulate(Chem.Mol(mol), constraints_on=True)
+    worst = max(
+        abs(np.linalg.norm(frame[i] - frame[j]) - d)
+        for frame in result["frames"] for i, j, d in constraints
+    )
+    assert worst < 1e-6
+
+
+def test_dynamics_api_both_modes():
+    for constraints, expected_fs in ((True, 800.0), (False, 80.0)):
+        resp = client.post("/api/dynamics", json={"query": "CCO", "constraints": constraints})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["constraints"] is constraints
+        assert data["fs_simulated"] == expected_fs
+        assert len(data["frames"]) > 100
