@@ -167,6 +167,28 @@ const dockingExampleButton = document.getElementById("docking-example");
 const dockingDockButton = document.getElementById("docking-dock");
 const dockingViewerContainer = document.getElementById("docking-viewer");
 const dockingInfoEl = document.getElementById("docking-info");
+const dockingProtonateInput = document.getElementById("docking-protonate");
+
+// Zahl mit Komma statt Punkt und echtem Minuszeichen, z.B. "−6,1 kcal/mol".
+function formatKcal(value) {
+  return `${value.toFixed(1).replace(".", ",").replace("-", "−")} kcal/mol`;
+}
+
+// Aufklappbare Details unter einem Ergebnis: sichtbar bleibt nur der eine klare
+// Satz, Methodik/Zahlen/Ehrlichkeitshinweise stehen einen Klick dahinter.
+function createDetails(lines, summaryText = "Details") {
+  const details = document.createElement("details");
+  details.className = "result-details";
+  const summary = document.createElement("summary");
+  summary.textContent = summaryText;
+  details.appendChild(summary);
+  for (const text of lines) {
+    const p = document.createElement("p");
+    p.textContent = text;
+    details.appendChild(p);
+  }
+  return details;
+}
 
 const dynamicsInput = document.getElementById("dynamics-input");
 const dynamicsExampleButton = document.getElementById("dynamics-example");
@@ -758,7 +780,11 @@ dockingDockButton.addEventListener("click", async () => {
     const response = await fetch("/api/dock", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ pdb_id: pdbId, ligand_query: ligandQuery }),
+      body: JSON.stringify({
+        pdb_id: pdbId,
+        ligand_query: ligandQuery,
+        protonate: dockingProtonateInput.checked,
+      }),
     });
     const data = await response.json();
     if (!response.ok) {
@@ -767,17 +793,34 @@ dockingDockButton.addEventListener("click", async () => {
 
     dockingViewer.setDockingResult(data);
 
-    const affinities = data.affinities.map((a) => `${a} kcal/mol`).join(", ");
+    const form = data.ligand_form;
+    let formText = "Ungeladen gedockt.";
+    if (form.changed) {
+      const sign = form.net_charge > 0 ? "+" : "−";
+      formText = `Gedockt in der Form, die im Körper vorliegt (Ladung ${sign}${Math.abs(form.net_charge)}).`;
+    } else if (form.protonate_requested) {
+      formText = "Im Körper ungeladen, deshalb unverändert gedockt.";
+    }
+
     dockingInfoEl.innerHTML = "";
     const name = document.createElement("span");
     name.className = "chemspace-info-name";
-    name.textContent = data.protein_name;
+    name.textContent = `${data.protein_name} (${pdbId.toUpperCase()})`;
     const detail = document.createElement("span");
     detail.className = "chemspace-info-detail";
-    detail.textContent = `Referenz-Ligand: ${data.reference_ligand} · Bindungsenergien: ${affinities}`;
+    detail.textContent = `Bindungsenergie ${formatKcal(data.affinities[0])} · ${formText}`;
     dockingInfoEl.appendChild(name);
     dockingInfoEl.appendChild(document.createElement("br"));
     dockingInfoEl.appendChild(detail);
+    dockingInfoEl.appendChild(
+      createDetails([
+        `Beste drei Posen: ${data.affinities.map(formatKcal).join(", ")}`,
+        `Suchbereich um den Referenz-Liganden ${data.reference_ligand} aus der Kristallstruktur.`,
+        `Gedockte Struktur (SMILES): ${form.smiles}`,
+        "Die Bindungsenergie ist eine Schätzung von AutoDock Vina. Vina bewertet Ladungen " +
+          "nicht direkt — die Ladungsform ändert vor allem, welche Atome Wasserstoffbrücken bilden können.",
+      ])
+    );
   } catch (err) {
     dockingInfoEl.hidden = true;
     show(errorEl, err.message || "Unbekannter Fehler.");

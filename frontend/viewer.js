@@ -379,11 +379,17 @@ export function createViewer(container) {
 
     const group = new THREE.Group();
 
+    // Halbtransparent: seit dem Rezeptor-Fix (docking.py, 2026-10-06) sitzt der
+    // Ligand wirklich IN der Bindetasche -- bei einer undurchsichtigen Röhre wäre
+    // er im Protein-Knäuel unsichtbar.
     const proteinMaterial = new THREE.MeshPhysicalMaterial({
       color: PROTEIN_TUBE_COLOR,
       roughness: 0.8,
       metalness: 0,
       clearcoat: 0,
+      transparent: true,
+      opacity: 0.35,
+      depthWrite: false,
     });
 
     for (const chain of data.chains) {
@@ -393,8 +399,6 @@ export function createViewer(container) {
       const tubularSegments = Math.max(points.length * 4, 8);
       const geometry = new THREE.TubeGeometry(curve, tubularSegments, PROTEIN_TUBE_RADIUS, 8, false);
       const tube = new THREE.Mesh(geometry, proteinMaterial);
-      tube.castShadow = true;
-      tube.receiveShadow = true;
       group.add(tube);
     }
 
@@ -427,7 +431,26 @@ export function createViewer(container) {
     for (const atom of data.ligand.atoms) {
       allPositions.push(new THREE.Vector3(atom.x, atom.y, atom.z));
     }
-    frameBox(new THREE.Box3().setFromPoints(allPositions));
+    const proteinBox = new THREE.Box3().setFromPoints(allPositions);
+    if (data.pocket_center && data.pocket_size) {
+      // Bindetasche statt ganzem Protein ins Bild: der Ligand ist das, was man
+      // sehen will. Zoom-Grenze trotzdem fürs ganze Protein, damit man per
+      // Mausrad bis zur Gesamtansicht herauszoomen kann.
+      const c = data.pocket_center;
+      const s = data.pocket_size;
+      frameBox(new THREE.Box3(
+        new THREE.Vector3(c.x - s.x / 2, c.y - s.y / 2, c.z - s.z / 2),
+        new THREE.Vector3(c.x + s.x / 2, c.y + s.y / 2, c.z + s.z / 2)
+      ));
+      const proteinRadius = proteinBox.getBoundingSphere(new THREE.Sphere()).radius;
+      controls.maxDistance = Math.max(controls.maxDistance, proteinRadius * 6);
+      shadowPlane.position.y = proteinBox.min.y - 0.05;
+    } else {
+      frameBox(proteinBox);
+    }
+    // Um den Liganden drehen, damit er beim Drehen in der Bildmitte bleibt.
+    controls.target.copy(new THREE.Box3().setFromObject(ligandGroup).getCenter(new THREE.Vector3()));
+    controls.update();
   }
 
   const TRAJECTORY_FRAME_INTERVAL_MS = 40; // ~25fps Wiedergabe

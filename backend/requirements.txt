@@ -8,6 +8,8 @@ numpy
 meeko
 scipy
 gemmi
+# Ladungsform des Docking-Liganden bei pH 7,4 (reines Python, nur RDKit + loguru)
+dimorphite_dl==2.1.0
 # Nur unter Linux/macOS installiert -- hat dort echte vorgebaute Wheels (manylinux),
 # unter Windows nicht (siehe docs/stand.md, docking.py). Dort wird stattdessen die
 # offizielle vina.exe-Binary unter backend/tools/ verwendet (Subprocess-Aufruf).

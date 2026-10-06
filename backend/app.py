@@ -56,6 +56,7 @@ class ChemicalSpaceRequest(BaseModel):
 class DockRequest(BaseModel):
     pdb_id: str
     ligand_query: str
+    protonate: bool = True
 
 
 class PdbLigandRequest(BaseModel):
@@ -152,7 +153,7 @@ def api_chemical_space(req: ChemicalSpaceRequest):
 @app.post("/api/dock")
 def api_dock(req: DockRequest):
     try:
-        return dock(req.pdb_id, req.ligand_query)
+        return dock(req.pdb_id, req.ligand_query, protonate=req.protonate)
     except DockingError as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
 

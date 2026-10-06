@@ -268,6 +268,46 @@ def test_dock_3ptb_benzamidine():
     assert data["reference_ligand"] == "BEN"
     assert len(data["affinities"]) > 0
     assert all(a < 0 for a in data["affinities"])  # gebundene Posen -> negative Energie
+    # Standard: Ladungsform bei pH 7,4 -- Benzamidin liegt dort als Amidinium (+1) vor.
+    assert data["ligand_form"]["changed"] is True
+    assert data["ligand_form"]["net_charge"] == 1
+
+
+def test_dock_3ptb_benzamidine_lands_in_s1_pocket():
+    # Regressionstest für den Rezeptor-Fix vom 2026-10-06: vorher blieb das Kristall-
+    # Benzamidin selbst im Rezeptor, die Tasche war besetzt und die beste Pose lag
+    # ~9 Å daneben. Jetzt muss ein Amidin-N die Salzbrücke zu Asp189 bilden
+    # (Kristall: 2,87 Å).
+    import math
+
+    resp = client.post("/api/dock", json={"pdb_id": "3PTB", "ligand_query": "benzamidine"})
+    data = resp.json()
+    pdb_lines = (Path(__file__).resolve().parent.parent / "pdb_cache" / "3PTB.pdb").read_text().splitlines()
+    asp189_o = [
+        (float(l[30:38]), float(l[38:46]), float(l[46:54]))
+        for l in pdb_lines
+        if l.startswith("ATOM") and l[17:20] == "ASP" and int(l[22:26]) == 189 and l[12:16].strip() in ("OD1", "OD2")
+    ]
+    ligand_n = [(a["x"], a["y"], a["z"]) for a in data["ligand"]["atoms"] if a["element"] == "N"]
+    assert min(math.dist(n, o) for n in ligand_n for o in asp189_o) < 3.5
+    assert data["affinities"][0] < -5.0
+
+
+def test_dock_without_protonation_keeps_neutral_form():
+    resp = client.post(
+        "/api/dock", json={"pdb_id": "3PTB", "ligand_query": "benzamidine", "protonate": False}
+    )
+    assert resp.status_code == 200
+    form = resp.json()["ligand_form"]
+    assert form["changed"] is False
+    assert form["net_charge"] == 0
+
+
+def test_protonate_for_ph_examples():
+    import docking
+
+    assert docking.protonate_for_ph("OC(=O)CN") == "[NH3+]CC(=O)[O-]"  # Glycin -> Zwitterion
+    assert docking.protonate_for_ph("CCO") is None  # Ethanol: nichts zu ändern
 
 
 def test_dock_invalid_pdb_id_returns_400():

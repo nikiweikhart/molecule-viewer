@@ -122,7 +122,7 @@ def _pdb_cache_path(pdb_id: str) -> Path:
 _PDB_ID_RE = re.compile(r"^[0-9][A-Z0-9]{3}$")
 
 
-def fetch_pdb(pdb_id: str) -> tuple[Path, str]:
+def fetch_pdb(pdb_id: str, with_name: bool = True) -> tuple[Path, str | None]:
     pdb_id = pdb_id.strip().upper()
     if not pdb_id:
         raise DockingError("PDB-ID ist leer.")
@@ -139,15 +139,62 @@ def fetch_pdb(pdb_id: str) -> tuple[Path, str]:
             raise DockingError(f"PDB-ID '{pdb_id}' wurde bei RCSB nicht gefunden.")
         path.write_text(resp.text, encoding="utf-8")
 
-    protein_name = pdb_id
-    try:
-        meta = requests.get(f"{RCSB_DATA}/{pdb_id}", timeout=10)
-        if meta.status_code == 200:
-            protein_name = meta.json().get("struct", {}).get("title", pdb_id)
-    except requests.RequestException:
-        pass
+    return path, (_readable_protein_name(pdb_id) if with_name else None)
 
-    return path, protein_name
+
+def _nice_case(text: str) -> str:
+    """RCSB-Beschreibungen sind oft komplett GROSS ("BETA-TRYPSIN") -- dann in
+    normale Schreibweise bringen ("Beta-Trypsin"), gemischte Schreibweise
+    ("HIV-1 protease", "Insulin A chain") bleibt unangetastet."""
+    if text != text.upper():
+        return text
+
+    def fix(part: str) -> str:
+        # Abkürzungen (HIV, DNA) und Teile mit Ziffern (HIV-1) bleiben groß.
+        if len(part) <= 3 or any(c.isdigit() for c in part):
+            return part
+        return part.capitalize()
+
+    return " ".join("-".join(fix(p) for p in word.split("-")) for word in text.split(" "))
+
+
+_protein_name_cache: dict[str, str] = {}
+
+
+def _readable_protein_name(pdb_id: str) -> str:
+    if pdb_id in _protein_name_cache:
+        return _protein_name_cache[pdb_id]
+    name = _fetch_readable_protein_name(pdb_id)
+    if name != pdb_id:  # Fallback bei Netzwerkfehler nicht dauerhaft cachen
+        _protein_name_cache[pdb_id] = name
+    return name
+
+
+def _fetch_readable_protein_name(pdb_id: str) -> str:
+    """Name der längsten Proteinkette (= vermutliches Zielprotein, nicht z.B. ein
+    Nanobody oder Peptid-Ligand) statt des langen Artikel-Titels der Struktur.
+    Fällt auf die PDB-ID zurück, wenn RCSB nicht erreichbar ist."""
+    try:
+        entry = requests.get(f"{RCSB_DATA}/{pdb_id}", timeout=10)
+        if entry.status_code != 200:
+            return pdb_id
+        entity_ids = entry.json().get("rcsb_entry_container_identifiers", {}).get("polymer_entity_ids", [])
+        best_name, best_len = None, -1
+        for entity_id in entity_ids[:8]:
+            resp = requests.get(
+                f"https://data.rcsb.org/rest/v1/core/polymer_entity/{pdb_id}/{entity_id}", timeout=10
+            )
+            if resp.status_code != 200:
+                continue
+            entity = resp.json()
+            length = entity.get("entity_poly", {}).get("rcsb_sample_sequence_length") or 0
+            name = entity.get("rcsb_polymer_entity", {}).get("pdbx_description")
+            if name and length > best_len:
+                # Manche Einträge wiederholen den Namen kommagetrennt (7FIM).
+                best_name, best_len = name.split(",")[0].strip(), length
+        return _nice_case(best_name) if best_name else pdb_id
+    except requests.RequestException:
+        return pdb_id
 
 
 def _parse_ca_backbone(pdb_text: str) -> list[list[dict]]:
@@ -354,7 +401,7 @@ def pdb_ligand(pdb_id: str, hetero_code: str | None = None, chain_ids: list[str]
     -- für die reine 3D-Darstellung (Kugel-Stab zeigt Bindungen ohnehin ohne
     Doppelbindungs-Unterscheidung) ausreichend, aber nicht chemisch bewiesen.
     """
-    pdb_path, _protein_name = fetch_pdb(pdb_id)
+    pdb_path, _ = fetch_pdb(pdb_id, with_name=False)
     pdb_text = pdb_path.read_text(encoding="utf-8")
 
     label, lines, is_peptide = _find_ligand_lines(pdb_text, hetero_code, chain_ids)
@@ -416,14 +463,28 @@ def pdb_ligand(pdb_id: str, hetero_code: str | None = None, chain_ids: list[str]
 
 
 def prepare_receptor(pdb_path: Path) -> Path:
-    basename = pdb_path.with_suffix("")
+    # Nur die Protein-Atome (ATOM-Zeilen) an meeko geben. Vorher ging die ganze
+    # PDB-Datei rein, und --delete_bad_res entfernt nur Reste OHNE Vorlage --
+    # meeko 0.8 kennt aber Vorlagen für Kristallwasser und z.B. Benzamidin (BEN),
+    # wodurch der Referenz-Ligand selbst + 62 Wasser im Rezeptor blieben. Die
+    # Bindetasche war damit besetzt, Vina musste den Liganden ~9 Å daneben legen
+    # (per Abstand zu Asp189 bei 3PTB nachgemessen, 2026-10-06). Standard beim
+    # Re-Docking: Wasser, Ionen und Liganden vorher entfernen.
+    clean_pdb = pdb_path.with_name(f"{pdb_path.stem}_protein.pdb")
+    basename = clean_pdb.with_suffix("")
     pdbqt_path = basename.with_suffix(".pdbqt")
     if pdbqt_path.exists():
         return pdbqt_path
 
+    protein_lines = [
+        line for line in pdb_path.read_text(encoding="utf-8").splitlines()
+        if line.startswith(("ATOM", "TER"))
+    ]
+    clean_pdb.write_text("\n".join(protein_lines + ["END"]) + "\n", encoding="utf-8")
+
     _run([
         *_tool_cmd(MEEKO_RECEPTOR),
-        "--read_pdb", str(pdb_path),
+        "--read_pdb", str(clean_pdb),
         "-o", str(basename),
         "-p",
         "--delete_bad_res",
@@ -435,6 +496,35 @@ def prepare_receptor(pdb_path: Path) -> Path:
     if rigid_path.exists():
         return rigid_path
     raise DockingError("Rezeptor-Vorbereitung hat keine PDBQT-Datei erzeugt.")
+
+
+PHYSIOLOGICAL_PH = 7.4
+
+
+def protonate_for_ph(smiles: str, ph: float = PHYSIOLOGICAL_PH) -> str | None:
+    """Ladungsform des Liganden bei Körper-pH (Dimorphite-DL, regelbasierte
+    pKa-Abschätzung auf RDKit-Basis). precision=0 -> genau der dominante
+    Zustand (z.B. Benzamidin -> Amidinium +1, Glycin -> Zwitterion), nicht alle
+    Varianten im pKa-Fenster. Gibt None zurück, wenn sich nichts ändert oder
+    Dimorphite scheitert -- dann wird wie bisher neutral gedockt.
+
+    Ehrliche Einordnung: Vinas Scoring-Funktion benutzt keine Partialladungen,
+    die Bindungsenergie ändert sich dadurch kaum. Was sich ändert, ist die
+    chemisch richtige Eingabe -- Wasserstoffe/Donor-Typen am geladenen Zentrum
+    (z.B. NH2+ statt =NH), die Vina für Wasserstoffbrücken sehr wohl auswertet."""
+    try:
+        from dimorphite_dl import protonate_smiles
+        from loguru import logger
+        logger.disable("dimorphite_dl")
+        variants = protonate_smiles(smiles, ph_min=ph, ph_max=ph, precision=0.0)
+    except Exception:
+        return None
+    if not variants:
+        return None
+    protonated = variants[0]
+    if Chem.CanonSmiles(protonated) == Chem.CanonSmiles(smiles):
+        return None
+    return protonated
 
 
 def prepare_ligand(mol, workdir: Path) -> Path:
@@ -537,7 +627,7 @@ def _export_poses(out_pdbqt: Path, workdir: Path) -> list[tuple[list[dict], list
     return poses
 
 
-def dock(pdb_id: str, ligand_query: str) -> dict:
+def dock(pdb_id: str, ligand_query: str, protonate: bool = True) -> dict:
     pdb_path, protein_name = fetch_pdb(pdb_id)
     pdb_text = pdb_path.read_text(encoding="utf-8")
 
@@ -552,9 +642,15 @@ def dock(pdb_id: str, ligand_query: str) -> dict:
     except chem.ResolveError as e:
         raise DockingError(f"Ligand nicht auflösbar: {e}")
 
-    mol = Chem.MolFromSmiles(ligand_info.smiles)
+    ligand_smiles = ligand_info.smiles
+    protonated_smiles = protonate_for_ph(ligand_smiles) if protonate else None
+    if protonated_smiles:
+        ligand_smiles = protonated_smiles
+
+    mol = Chem.MolFromSmiles(ligand_smiles)
     if mol is None:
-        raise DockingError(f"Liganden-SMILES konnte nicht gelesen werden: {ligand_info.smiles}")
+        raise DockingError(f"Liganden-SMILES konnte nicht gelesen werden: {ligand_smiles}")
+    net_charge = Chem.GetFormalCharge(mol)
     mol = Chem.AddHs(mol)
     if AllChem.EmbedMolecule(mol, AllChem.ETKDGv3()) != 0:
         raise DockingError("Konnte keine 3D-Startstruktur für den Liganden berechnen.")
@@ -584,6 +680,12 @@ def dock(pdb_id: str, ligand_query: str) -> dict:
         "pocket_size": box_info["size"],
         "reference_ligand": box_info["resname"],
         "affinities": affinities[:3],
+        "ligand_form": {
+            "protonate_requested": protonate,
+            "changed": protonated_smiles is not None,
+            "net_charge": net_charge,
+            "smiles": ligand_smiles,
+        },
     }
 
 
