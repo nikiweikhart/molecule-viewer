@@ -231,12 +231,6 @@
       </section>
 
       <section class="mode-view" data-mode-view="folding" hidden>
-        <div class="chemspace-info" style="margin-bottom: 10px">
-          Echte ML-basierte Faltungsvorhersage (Boltz-2, AlphaFold3-artige Architektur) --
-          im Unterschied zur reinen Kraftfeld-Näherung unter "Kleine Peptide" in der Bibliothek.
-          Dauert deutlich länger (typisch mehrere Minuten, siehe Hinweistext nach der
-          Berechnung) und braucht Internet für den MSA-Server.
-        </div>
         <div class="docking-controls">
           <input
             id="folding-input"
@@ -246,6 +240,13 @@
           />
           <button type="button" id="folding-example" class="ghost-button">Beispiel laden</button>
           <button type="button" id="folding-run">Vorhersagen</button>
+        </div>
+        <div class="option-row" id="folding-atoms-row" hidden>
+          <label class="switch" title="Große Proteine werden als Röhre entlang des Rückgrats gezeigt. Hier lassen sich stattdessen alle Atome einblenden.">
+            <input type="checkbox" id="folding-all-atoms" />
+            <span class="switch-track"></span>
+            <span>Alle Atome zeigen</span>
+          </label>
         </div>
         <div class="viewer-frame">
           <div id="folding-viewer" class="viewer"></div>

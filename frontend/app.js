@@ -254,15 +254,31 @@ function removeSlot(index) {
   }
 }
 
+// Summenformel wie im Chemiebuch: Zahlen nach einem Element tiefgestellt
+// (C9H8O4 -> C₉H₈O₄). Kompakter als die Ziffernfolge und bricht auf dem
+// Handy nicht mehr mitten in einer Zahl um.
+function formulaHtml(formula) {
+  return escapeHtml(String(formula)).replace(/([A-Za-z)\]])(\d+)/g, "$1<sub>$2</sub>");
+}
+
 function renderFacts(slot, facts) {
   slot.factsEl.innerHTML = "";
   for (const def of FACT_DEFS) {
+    // Werte, die es für diese Struktur nicht gibt (z.B. LogP bei gemessenen
+    // Proteinstrukturen ohne Wasserstoffe), gar nicht erst als "–"-Kachel zeigen.
+    const raw = facts[def.key];
+    if (raw === null || raw === undefined || raw === "–") continue;
+
     const tile = document.createElement("div");
     tile.className = "fact-tile";
 
     const value = document.createElement("div");
     value.className = "fact-value";
-    value.textContent = facts[def.key];
+    if (def.key === "formula") {
+      value.innerHTML = formulaHtml(raw);
+    } else {
+      value.textContent = raw;
+    }
     if (def.unit) {
       const unit = document.createElement("span");
       unit.className = "unit";
@@ -289,14 +305,13 @@ function renderNames(slot, data) {
   slot.resultNamesEl.hidden = false;
 }
 
+// Die KI-Erklärung erscheint nur, wenn es eine gibt. Ohne API-Key oder bei
+// einem Verbindungsfehler bleibt der Kasten einfach weg -- ein Hinweis wie
+// "Kein ANTHROPIC_API_KEY gesetzt" ist Entwickler-Information, nichts für Nutzer.
 async function loadExplanation(slot, data) {
-  slot.explainEl.hidden = false;
-  slot.explainEl.className = "explain loading";
-  slot.explainEl.textContent = "KI-Erklärung wird geladen …";
-
-  let response;
+  slot.explainEl.hidden = true;
   try {
-    response = await fetch("/api/explain", {
+    const response = await fetch("/api/explain", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -305,19 +320,13 @@ async function loadExplanation(slot, data) {
         formula: data.facts.formula,
       }),
     });
-  } catch (err) {
-    slot.explainEl.className = "explain unavailable";
-    slot.explainEl.textContent = "KI-Erklärung: Verbindung fehlgeschlagen.";
-    return;
-  }
-
-  const result = await response.json();
-  if (result.available) {
+    const result = await response.json();
+    if (!result.available) return; // Grund steht in result.reason (z.B. kein API-Key)
     slot.explainEl.className = "explain";
     slot.explainEl.textContent = result.text;
-  } else {
-    slot.explainEl.className = "explain unavailable";
-    slot.explainEl.textContent = `KI-Erklärung noch nicht verfügbar (${result.reason})`;
+    slot.explainEl.hidden = false;
+  } catch (err) {
+    /* Erklärung ist eine Zugabe -- ohne sie funktioniert alles andere normal. */
   }
 }
 
@@ -906,6 +915,32 @@ foldingExampleButton.addEventListener("click", () => {
   foldingInput.value = "Oxytocin";
 });
 
+const FOLDING_TUBE_MIN_RESIDUES = 60;
+const foldingAtomsRow = document.getElementById("folding-atoms-row");
+const foldingAllAtomsInput = document.getElementById("folding-all-atoms");
+let lastFolding = null;
+
+function showFolding() {
+  if (!lastFolding) return;
+  const asTube = lastFolding.residue_count > FOLDING_TUBE_MIN_RESIDUES && !foldingAllAtomsInput.checked;
+  if (asTube) {
+    foldingViewer.setProteinTube(lastFolding.chains);
+  } else {
+    foldingViewer.setMolecule(lastFolding.atoms, lastFolding.bonds);
+  }
+}
+
+foldingAllAtomsInput.addEventListener("change", showFolding);
+
+// pLDDT in Worten -- gleiche Schwellen wie die AlphaFold-Datenbank.
+function confidenceInWords(plddt) {
+  if (plddt == null) return "Vorhersage ohne Konfidenzwert";
+  if (plddt >= 90) return "Vorhersage sehr sicher";
+  if (plddt >= 70) return "Vorhersage sicher";
+  if (plddt >= 50) return "Vorhersage unsicher";
+  return "Vorhersage sehr unsicher";
+}
+
 // Boltz-2 braucht eine lokale GPU (siehe backend/folding.py) -- auf einem Hosting-Tier
 // ohne GPU (z.B. der öffentlichen Deployment-Instanz) proaktiv ausgrauen statt erst
 // nach einem fehlgeschlagenen Versuch zu erklären, warum es nicht geht.
@@ -939,10 +974,9 @@ foldingRunButton.addEventListener("click", async () => {
   hide(errorEl);
   foldingInfoEl.hidden = false;
   foldingInfoEl.className = "chemspace-info";
-  foldingInfoEl.textContent =
-    "Wird mit Boltz-2 berechnet … das kann je nach Sequenzlänge und Hardware " +
-    "mehrere Minuten dauern (echte ML-Struktur-Vorhersage, keine Näherung).";
+  foldingInfoEl.textContent = "Wird berechnet … dauert etwa eine Minute.";
   foldingRunButton.disabled = true;
+  foldingAtomsRow.hidden = true;
 
   try {
     const response = await fetch("/api/fold", {
@@ -957,18 +991,37 @@ foldingRunButton.addEventListener("click", async () => {
       throw new Error(data.error || "Unbekannter Fehler.");
     }
 
-    foldingViewer.setMolecule(data.atoms, data.bonds);
+    lastFolding = data;
+    // Große Proteine automatisch als Röhre -- als Kugeln wären es Tausende Atome.
+    const isLarge = data.residue_count > FOLDING_TUBE_MIN_RESIDUES;
+    foldingAtomsRow.hidden = !isLarge;
+    foldingAllAtomsInput.checked = false;
+    showFolding();
 
+    const conf = data.confidence || {};
+    const plddt = conf.complex_plddt != null ? conf.complex_plddt * 100 : null;
     foldingInfoEl.innerHTML = "";
     const name = document.createElement("span");
     name.className = "chemspace-info-name";
-    name.textContent = data.common_name;
+    name.textContent = `${data.input_name || "Eigene Sequenz"} · ${data.residue_count} Aminosäuren`;
     const detail = document.createElement("span");
     detail.className = "chemspace-info-detail";
-    detail.textContent = data.note;
+    detail.textContent = `${confidenceInWords(plddt)} · berechnet in ${data.elapsed_s} Sekunden.`;
     foldingInfoEl.appendChild(name);
     foldingInfoEl.appendChild(document.createElement("br"));
     foldingInfoEl.appendChild(detail);
+    const detailLines = [];
+    const scores = [];
+    if (plddt != null) scores.push(`pLDDT ${plddt.toFixed(0)}/100 (lokale Sicherheit)`);
+    if (conf.ptm != null) scores.push(`pTM ${conf.ptm.toFixed(2)} (Gesamtform)`);
+    if (conf.confidence_score != null) scores.push(`Gesamt-Konfidenz ${conf.confidence_score.toFixed(2)}`);
+    if (scores.length) detailLines.push(`${scores.join(", ")}.`);
+    detailLines.push(
+      "Vorhergesagt mit Boltz-2 (KI-Modell, ähnlich AlphaFold 3) auf der eigenen Grafikkarte. " +
+        "Bindungen aus den Atomabständen geschätzt.",
+      `Sequenz: ${data.sequence}`
+    );
+    foldingInfoEl.appendChild(createDetails(detailLines));
   } catch (err) {
     foldingInfoEl.hidden = true;
     show(errorEl, err.message || "Unbekannter Fehler.");
@@ -1081,7 +1134,7 @@ const MODE_INTROS = {
   docking: "Gib eine PDB-ID und einen Liganden ein, um zu sehen, wie der Ligand in die Bindungstasche des Proteins passt.",
   dynamics: "Simuliere, wie sich ein Molekül bei Raumtemperatur bewegt — ein einfaches Kraftfeld, keine Quantenmechanik.",
   folding:
-    "Sage die 3D-Struktur eines Peptids mit einem echten ML-Modell (Boltz-2) vorher — dauert deutlich länger als die anderen Funktionen.",
+    "Gib eine Aminosäure-Sequenz oder einen Namen wie „Glucagon“ ein — ein KI-Modell (Boltz-2, ähnlich AlphaFold) sagt voraus, wie sich das Protein faltet. Dauert etwa eine Minute.",
   salts:
     "Wähle ein Kation und ein Anion — die Verhältnisformel wird per Kreuzregel berechnet (Ladungen kreuzweise als Indizes), z. B. Aluminium + Sulfat → Al₂(SO₄)₃.",
 };

@@ -129,8 +129,12 @@ def _run_boltz(fasta_path: Path, out_dir: Path) -> subprocess.CompletedProcess:
     ]
     env = {**os.environ, "TORCH_BLAS_PREFER_HIPBLASLT": "1"}  # AMD-Empfehlung für RDNA3+PyTorch<2.14
     try:
+        # encoding explizit: ohne liest Python unter Windows mit cp1252, und Boltz'
+        # Fortschrittsbalken enthält Bytes, die es dort nicht gibt (0x8d) --
+        # der Lese-Thread stürzte dann ab (2026-10-06 bei 515 Resten gesehen).
         result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=TIMEOUT_SECONDS, env=env,
+            cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=TIMEOUT_SECONDS, env=env,
         )
     except subprocess.TimeoutExpired:
         raise FoldingError(
@@ -252,6 +256,13 @@ def build_folding(name: str | None = None, sequence: str | None = None) -> dict:
         "iupac_name": None,
         "note": note,
         "confidence": confidence,
+        # Cα-Rückgrat für die Röhren-Ansicht großer Proteine (Frontend wählt
+        # automatisch, siehe app.js) -- gleicher Parser wie beim Docking.
+        "chains": docking._parse_ca_backbone(pdb_block),
+        "residue_count": len(seq),
+        "sequence": seq,
+        "input_name": display_name if name and not sequence else None,
+        "elapsed_s": round(elapsed),
     }
 
 

@@ -1,5 +1,41 @@
 # Stand: Molekül-Viewer
 
+## 2026-10-06 (später): Grill-Runde mit Niki + Ausbau, ZWISCHENSTAND (Nutzungslimit)
+
+Leitlinie von Niki: **„wie Apple“, intuitiv, einfach**. Gute Standardwerte,
+Schalter in Alltagssprache, Details aufklappbar (`createDetails()` in app.js).
+
+**Fertig + gepusht:** Glucagon (1GCN im Suchfeld/Bibliothek, Name im
+Boltz-Bereich, `28c1b87`). **Docking** (`c71c348`): Bindetasche war vom
+Kristall-Liganden + Wasser besetzt (meeko bekam ganze PDB-Datei), jetzt nur
+ATOM-Zeilen -> Benzamidin 0,2 Å neben Kristallposition, Salzbrücke zu
+Asp189 2,95 Å, −6,1 statt −4,0 kcal/mol; Ligand in Ladungsform bei pH 7,4
+(Dimorphite-DL, Schalter „Wie im Körper“); lesbarer Proteinname; Protein
+halbtransparent, Kamera auf Tasche. **MD** (`744562f`): echte Ursache der
+Instabilität = RDKit `CalcGrad(pos)` nutzt Abstands-Cache, den nur
+`CalcEnergy(pos)` erneuert -> Fix, Force-Capping raus, RATTLE für X-H
+(1 fs, 800 fs), Schalter „Schnelle Wasserstoff-Schwingungen zeigen“, erste
+MD-Tests. **4 Reaktionen** (`04276ca`): Aspirin-Synthese, Peptidbindung,
+Diels-Alder, Verseifung + Balance-Test.
+
+**Im letzten Commit, nur teilweise geprüft:** Handy-Ansicht (Canvas drückte
+Seite auf 618 px -> alle 9 Bereiche jetzt 375 px ohne Seitwärts-Scrollen,
+geprüft), Summenformel tiefgestellt, leere „–“-Kacheln + Entwickler-Hinweis
+zum API-Key ausgeblendet (geprüft), UTF-8 beim Lesen der Boltz-/Vina-Ausgabe.
+Boltz-Röhren-Ansicht ab 60 Resten + Schalter „Alle Atome zeigen“ +
+vereinfachte Ergebnisanzeige: **Code fertig, im Browser NOCH NICHT getestet.**
+
+**Boltz-Grenze:** 515 Reste (verkettete Testproteine) liefen in 193 s,
+VRAM-Spitze 11,8 GB. 1030-Reste-Lauf gestartet, Ergebnis nicht mehr
+abgewartet. `MAX_RESIDUES` steht weiter auf 250.
+
+**Offen:** Röhren-Ansicht im Browser testen (z.B. GFP), 1030er-Lauf
+wiederholen und Limit (vermutlich ~500) setzen, Bildausschnitt/Schatten
+großer Moleküle, Bibliothek-Karten mit echtem Namen statt „Peptid-Ligand aus
+1GCN“, Einfachheits-Durchgang über die übrigen Hinweistexte, ausführliche
+Doku dieses Eintrags + Wiki-Seite, Live-Seite nach Render-Deploy prüfen
+(neue Abhängigkeit dimorphite_dl).
+
 ## 2026-10-06: Boltz-2-Darstellung erneut end-to-end bestätigt, Limit 50 → 250 Reste, zwei Viewer-Fixes
 
 Auftrag von Niki: Boltz-2-Faltung im sichtbaren Browser mit Screenshot und

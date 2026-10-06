@@ -96,7 +96,9 @@ class DockingError(Exception):
 
 def _run(cmd: list[str], step: str) -> subprocess.CompletedProcess:
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        # errors="replace": unter Windows sonst cp1252-Dekodierung, die an
+        # Nicht-ASCII-Bytes der Tool-Ausgabe scheitern kann (siehe folding.py).
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     except FileNotFoundError as exc:
         # Diagnose-Hilfe für die Deployment-Umgebung, wo kein Shell-Zugriff möglich ist
         # (Render Free-Tier) -- zeigt, wo genau gesucht wurde und was tatsächlich im

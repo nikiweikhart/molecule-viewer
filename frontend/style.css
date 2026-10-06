@@ -436,6 +436,12 @@ button:hover {
 
 .reaction-row select {
   flex: 1 1 260px;
+  /* Ein <select> ist sonst so breit wie seine längste Option ("Aspirin-Synthese
+     — Salicylsäure + Essigsäureanhydrid → ...") und drückt die Seite auf dem
+     Handy breiter als den Bildschirm. */
+  min-width: 0;
+  max-width: 100%;
+  text-overflow: ellipsis;
   background: var(--panel);
   border: 1px solid var(--line);
   color: var(--text);
@@ -459,6 +465,8 @@ button:hover {
 
 .salt-controls select {
   flex: 1 1 200px;
+  min-width: 0;
+  max-width: 100%;
   background: var(--panel);
   border: 1px solid var(--line);
   color: var(--text);
@@ -780,6 +788,16 @@ button:hover {
   height: 100%;
 }
 
+/* Die Canvas füllt immer ihren Container aus, statt ihn aufzudrücken. Ohne
+   CSS-Größe zeigte sie sich in ihrer Pixelgröße (z.B. 600 px), der Container
+   wuchs mit, und resize() maß danach wieder 600 px -- auf dem Handy war die
+   ganze Seite dadurch 618 statt 375 px breit (seitliches Scrollen). */
+.viewer canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+}
+
 .export-button {
   position: absolute;
   top: 14px;
@@ -827,11 +845,14 @@ button:hover {
   border: 1px solid var(--line);
   border-radius: 12px;
   overflow: hidden;
-  background: var(--line);
+  /* Trennlinien an den Kacheln selbst statt Raster-Hintergrund -- sonst bleibt
+     bei einer ungeraden Kachelzahl eine graue Leerfläche stehen. */
+  background: var(--panel);
 }
 
 .fact-tile {
   background: var(--panel);
+  box-shadow: 0 0 0 0.5px var(--line);
   padding: 16px 18px;
   display: flex;
   flex-direction: column;
@@ -843,6 +864,8 @@ button:hover {
   font-weight: 600;
   color: var(--text);
   font-variant-numeric: tabular-nums;
+  /* Lange Summenformeln großer Moleküle (z.B. C153N43O49S) umbrechen statt abschneiden. */
+  overflow-wrap: anywhere;
 }
 
 .fact-value .unit {
@@ -903,6 +926,14 @@ button:hover {
 @media (max-width: 860px) {
   .app-shell {
     flex-direction: column;
+    /* Gestapelt: Hauptbereich auf Bildschirmbreite strecken. Mit flex-start
+       wurde er so breit wie sein breitester unteilbarer Inhalt (z.B. ein
+       Auswahlmenü mit langer Option) -> seitliches Scrollen auf dem Handy. */
+    align-items: stretch;
+  }
+
+  .main-panel {
+    width: 100%;
   }
 
   .sidebar {

@@ -552,6 +552,65 @@ export function createViewer(container) {
     trajectoryFrameHandle = requestAnimationFrame(tick);
   }
 
+  // Farbverlauf entlang der Kette (Anfang blau -> creme -> Ende bernstein):
+  // macht sichtbar, wie die Kette durch die Faltung läuft, ohne Legende.
+  const TUBE_GRADIENT = [new THREE.Color(0x4a7ebd), new THREE.Color(0xefe8dd), new THREE.Color(0xe0965a)];
+
+  function gradientColor(t) {
+    const scaled = t * (TUBE_GRADIENT.length - 1);
+    const i = Math.min(Math.floor(scaled), TUBE_GRADIENT.length - 2);
+    return TUBE_GRADIENT[i].clone().lerp(TUBE_GRADIENT[i + 1], scaled - i);
+  }
+
+  // Große Proteine als Rückgrat-Röhre statt ~8 Kugeln pro Aminosäure -- teilt
+  // sich den Szenen-Slot mit der Docking-Ansicht (beides "Protein-Ansichten",
+  // clearDocking() räumt beide auf).
+  function setProteinTube(chains) {
+    clearReaction();
+    clearDocking();
+    clearTrajectory();
+    if (moleculeGroup) {
+      scene.remove(moleculeGroup);
+      moleculeGroup = null;
+    }
+    currentAtoms = null;
+    currentBonds = null;
+
+    const group = new THREE.Group();
+    const material = new THREE.MeshPhysicalMaterial({
+      vertexColors: true,
+      roughness: 0.45,
+      metalness: 0.05,
+      clearcoat: 0.3,
+    });
+    const radialSegments = 10;
+    const allPositions = [];
+
+    for (const chain of chains) {
+      if (chain.length < 2) continue;
+      const points = chain.map((p) => new THREE.Vector3(p.x, p.y, p.z));
+      allPositions.push(...points);
+      const curve = new THREE.CatmullRomCurve3(points, false, "centripetal");
+      const tubularSegments = Math.max(points.length * 6, 12);
+      const geometry = new THREE.TubeGeometry(curve, tubularSegments, 0.55, radialSegments, false);
+      const colors = [];
+      for (let i = 0; i <= tubularSegments; i++) {
+        const c = gradientColor(i / tubularSegments);
+        for (let j = 0; j <= radialSegments; j++) colors.push(c.r, c.g, c.b);
+      }
+      geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+      const tube = new THREE.Mesh(geometry, material);
+      tube.castShadow = true;
+      tube.receiveShadow = true;
+      group.add(tube);
+    }
+
+    scene.add(group);
+    dockingGroup = group;
+    resize();
+    frameBox(new THREE.Box3().setFromPoints(allPositions));
+  }
+
   resize();
   animate();
   window.addEventListener("resize", resize);
@@ -568,6 +627,7 @@ export function createViewer(container) {
     },
     playReaction,
     setDockingResult,
+    setProteinTube,
     playTrajectory,
     captureScreenshot() {
       // Kein preserveDrawingBuffer auf dem Renderer (siehe docs/stand.md -- das
