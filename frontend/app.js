@@ -144,6 +144,7 @@ const LIBRARY_CATEGORIES = [
     items: [
       { label: "Ozempic / Semaglutid", pdbId: "4ZGM" },
       { label: "Insulin (an seinem Rezeptor)", pdbId: "4OGA", chainIds: ["A", "B"] },
+      { label: "Glucagon", pdbId: "1GCN", chainIds: ["A"] },
     ],
   },
   {

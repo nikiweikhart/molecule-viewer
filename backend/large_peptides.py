@@ -49,6 +49,12 @@ LARGE_PEPTIDE_STRUCTURES: dict[str, dict] = {
         "display_name": "Insulin aspart (Wildtyp-Struktur gezeigt)",
         "caveat": _GLARGINE_CAVEAT,
     },
+    # Glucagon (29 AS) -- zu groß für EmbedMolecule, zu lang für den 15-Reste-
+    # Peptidmodus. 1GCN = "X-ray analysis of glucagon", eine einzige Kette A mit
+    # exakt der Glucagon-Sequenz (per RCSB-Entity-Abruf geprüft, 2026-10-06).
+    # Ohne längere Gegenkette greift die Peptid-Heuristik nicht -> Kette explizit.
+    "glucagon": {"pdb_id": "1GCN", "chain_ids": ["A"], "display_name": "Glucagon"},
+    "glukagon": {"pdb_id": "1GCN", "chain_ids": ["A"], "display_name": "Glucagon"},
 }
 
 

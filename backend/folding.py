@@ -70,6 +70,10 @@ _KNOWN_PEPTIDES = {
     "met enkephalin": "YGGFM",
     "leu-enkephalin": "YGGFL",
     "leu enkephalin": "YGGFL",
+    # Glucagon (29 AS) -- erst seit MAX_RESIDUES=250 sinnvoll; gemessene
+    # Vergleichsstruktur gibt es über das Haupt-Suchfeld (PDB 1GCN).
+    "glucagon": "HSQGTFTSDYSKYLDSRRAQDFVQWLMNT",
+    "glukagon": "HSQGTFTSDYSKYLDSRRAQDFVQWLMNT",
 }
 
 # Boltz-2 selbst hat kein hartes Zeitlimit -- diese Ausbaustufe begrenzt es
@@ -98,7 +102,7 @@ def _resolve_sequence(name: str | None, sequence: str | None) -> tuple[str, str]
         key = name.strip().lower()
         if key in _KNOWN_PEPTIDES:
             return _KNOWN_PEPTIDES[key], name.strip()
-        known = sorted({"Oxytocin", "Vasopressin", "Met-Enkephalin", "Leu-Enkephalin"})
+        known = sorted({"Oxytocin", "Vasopressin", "Met-Enkephalin", "Leu-Enkephalin", "Glucagon"})
         raise FoldingError(
             f"'{name}' ist nicht in der kuratierten Liste ({', '.join(known)}). "
             "Alternativ die Sequenz direkt als Ein-Buchstaben-Code eingeben."

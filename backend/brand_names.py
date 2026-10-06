@@ -64,4 +64,7 @@ BRAND_TO_SUBSTANCE: dict[str, str] = {
     "lantus": "insulin glargine",
     "humalog": "insulin lispro",
     "novorapid": "insulin aspart",
+    # Glucagon-Notfallpräparate (Unterzuckerung)
+    "glucagen": "glucagon",
+    "baqsimi": "glucagon",
 }

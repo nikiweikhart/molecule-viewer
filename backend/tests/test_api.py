@@ -124,6 +124,9 @@ def test_resolve_large_peptide_brand_names():
         ("Mounjaro", "Tirzepatide"),
         ("Victoza", "Liraglutide"),
         ("insulin", "Insulin"),
+        ("Glucagon", "Glucagon"),
+        ("Glukagon", "Glucagon"),
+        ("GlucaGen", "Glucagon"),
     ]:
         resp = client.post("/api/resolve", json={"query": query})
         assert resp.status_code == 200, query
