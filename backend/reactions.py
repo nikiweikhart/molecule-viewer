@@ -24,6 +24,49 @@ REACTIONS = [
         "reactants_smiles": "[CH3:1][C:2](=[O:3])[OH:4].[CH3:5][CH2:6][OH:7]",
         "products_smiles": "[CH3:1][C:2](=[O:3])[O:7][CH2:6][CH3:5].[OH2:4]",
     },
+    {
+        # Phenol-O der Salicylsäure greift einen Carbonyl-C des Anhydrids an,
+        # Acetat verlässt das Molekül und wird zu Essigsäure.
+        "id": "aspirin-synthesis",
+        "label": "Aspirin-Synthese — Salicylsäure + Essigsäureanhydrid → Aspirin + Essigsäure",
+        "reactants_smiles": (
+            "[OH:1][c:2]1[cH:3][cH:4][cH:5][cH:6][c:7]1[C:8](=[O:9])[OH:10]"
+            ".[CH3:11][C:12](=[O:13])[O:14][C:15](=[O:16])[CH3:17]"
+        ),
+        "products_smiles": (
+            "[CH3:11][C:12](=[O:13])[O:1][c:2]1[cH:3][cH:4][cH:5][cH:6][c:7]1[C:8](=[O:9])[OH:10]"
+            ".[OH:14][C:15](=[O:16])[CH3:17]"
+        ),
+    },
+    {
+        # Kondensation wie bei der Veresterung: C-OH der Carbonsäure bricht,
+        # C-N zur Aminogruppe der nächsten Aminosäure entsteht, Wasser geht.
+        "id": "peptide-bond",
+        "label": "Peptidbindung — Glycin + Alanin → Dipeptid (Gly-Ala) + Wasser",
+        "reactants_smiles": (
+            "[NH2:1][CH2:2][C:3](=[O:4])[OH:5]"
+            ".[NH2:6][C@@H:7]([CH3:8])[C:9](=[O:10])[OH:11]"
+        ),
+        "products_smiles": (
+            "[NH2:1][CH2:2][C:3](=[O:4])[NH:6][C@@H:7]([CH3:8])[C:9](=[O:10])[OH:11]"
+            ".[OH2:5]"
+        ),
+    },
+    {
+        # Zwei neue C-C-Bindungen gleichzeitig schließen den Sechsring.
+        "id": "diels-alder",
+        "label": "Diels-Alder — Butadien + Ethen → Cyclohexen",
+        "reactants_smiles": "[CH2:1]=[CH:2][CH:3]=[CH2:4].[CH2:5]=[CH2:6]",
+        "products_smiles": "[CH2:1]1[CH:2]=[CH:3][CH2:4][CH2:5][CH2:6]1",
+    },
+    {
+        # Hydroxid greift den Carbonyl-C an, Ethoxid verlässt das Molekül
+        # (Umkehrung der Veresterung oben, die Grundreaktion der Seifenherstellung).
+        "id": "saponification",
+        "label": "Verseifung — Ethylacetat + Natronlauge → Natriumacetat + Ethanol",
+        "reactants_smiles": "[CH3:1][C:2](=[O:3])[O:4][CH2:5][CH3:6].[OH-:7].[Na+:8]",
+        "products_smiles": "[CH3:1][C:2](=[O:3])[O-:7].[Na+:8].[OH:4][CH2:5][CH3:6]",
+    },
 ]
 
 _FRAGMENT_GAP = 3.5  # Å Abstand zwischen nebeneinander platzierten Fragmenten

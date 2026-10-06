@@ -526,3 +526,41 @@ def test_dynamics_api_both_modes():
         assert data["constraints"] is constraints
         assert data["fs_simulated"] == expected_fs
         assert len(data["frames"]) > 100
+
+
+# --- Reaktions-Animationen --------------------------------------------------
+
+def test_all_curated_reactions_are_balanced_and_fully_mapped():
+    # Jede handkuratierte Reaktion: jedes Schweratom hat eine Map-Nummer, beide
+    # Seiten haben dieselben Map-Nummern mit demselben Element, und die
+    # Summenformel (inkl. H) bleibt erhalten.
+    from rdkit import Chem
+    from rdkit.Chem.rdMolDescriptors import CalcMolFormula
+
+    import reactions
+
+    def formula(mol):
+        mol = Chem.Mol(mol)
+        for atom in mol.GetAtoms():
+            atom.SetAtomMapNum(0)
+        return CalcMolFormula(Chem.AddHs(mol))
+
+    for entry in reactions.REACTIONS:
+        left = Chem.MolFromSmiles(entry["reactants_smiles"])
+        right = Chem.MolFromSmiles(entry["products_smiles"])
+        left_maps = {a.GetAtomMapNum(): a.GetSymbol() for a in left.GetAtoms()}
+        right_maps = {a.GetAtomMapNum(): a.GetSymbol() for a in right.GetAtoms()}
+        assert 0 not in left_maps and 0 not in right_maps, entry["id"]
+        assert left_maps == right_maps, entry["id"]
+        assert formula(left) == formula(right), entry["id"]
+
+
+def test_reactions_api_lists_and_builds_all():
+    listing = client.get("/api/reactions").json()
+    ids = {r["id"] for r in listing}
+    assert {"esterification", "aspirin-synthesis", "peptide-bond", "diels-alder", "saponification"} <= ids
+    for reaction_id in ids:
+        resp = client.get(f"/api/reactions/{reaction_id}")
+        assert resp.status_code == 200, reaction_id
+        data = resp.json()
+        assert data["broken_bonds"] or data["formed_bonds"], reaction_id
