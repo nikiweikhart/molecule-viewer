@@ -6,3 +6,6 @@ __pycache__/
 .env
 pdb_cache/
 vina.exe
+
+# Lokale Claude-Code-Rechte (maschinenspezifisch)
+.claude/settings.local.json

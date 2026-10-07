@@ -1377,7 +1377,7 @@ Branch heißt `main` (vorher `master`, umbenannt vor dem Push).
 
 Letzte der drei "richtig aufwendigen", API-freien Folge-Ausbaustufen
 (nach chemischem Raum und Protein-Docking). Bauplan lag in
-`C:\Users\nikiw\.claude\plans\ethereal-dancing-corbato.md`.
+`ethereal-dancing-corbato.md` (lokale Plan-Datei, inzwischen überschrieben; letzte Fassung = Molekulardynamik, im Repo als `docs/bauplan-molekulardynamik.md`).
 
 **Ergebnis: fertig und im Browser getestet.** Man gibt ein Molekül ein
 (Name/Formel/SMILES, gleiches Format wie überall), klickt "Simulieren",
@@ -1485,7 +1485,7 @@ neue Abhängigkeit aus.
 Niki wollte Tennis spielen gehen und hat gesagt: alles bauen, was schon
 besprochen war (Protein-Docking), bei Fragen selbst entscheiden statt zu
 warten, und gern noch selbst draufgepackte Ideen einbauen. Bauplan lag in
-`C:\Users\nikiw\.claude\plans\ethereal-dancing-corbato.md` (Protein-Docking-
+`ethereal-dancing-corbato.md` (lokale Plan-Datei, inzwischen überschrieben; Protein-Docking-
 Version — der chemische Raum davor hat den gleichen Dateinamen benutzt,
 Plan-Dateien werden pro Session wiederverwendet, nicht pro Ausbaustufe).
 
@@ -1611,7 +1611,7 @@ laufen (siehe Gedächtnis `project_molecule_viewer.md` für die anderen
 zwei — Protein-Docking und Molekulardynamik, noch offen). Gewählt: viele
 Moleküle auf einmal eingeben, nach struktureller Ähnlichkeit auf einer 2D-
 Karte anordnen und gruppieren. Bauplan lag in
-`C:\Users\nikiw\.claude\plans\ethereal-dancing-corbato.md`.
+`ethereal-dancing-corbato.md` (lokale Plan-Datei, inzwischen überschrieben; letzte Fassung = Molekulardynamik, im Repo als `docs/bauplan-molekulardynamik.md`).
 
 **Keine neue Abhängigkeit installiert** — `numpy` war schon als RDKit-
 Abhängigkeit in der venv vorhanden, PCA und k-Means sind selbst mit numpy
@@ -1778,7 +1778,7 @@ und `curl` bestätigt):**
 
 Der volle Bauplan mit allen Details (genaue Interpolations-/Opazitäts-Logik,
 Elementfarben-Wiederverwendung usw.) steht unverändert in
-`C:\Users\nikiw\.claude\plans\swirling-knitting-wadler.md` — beim
+`docs/bauplan-reaktions-animation.md` — beim
 Weitermachen zuerst dort nachlesen, dann direkt bei Schritt 3
 ("Umsetzungsschritte") weitermachen.
 

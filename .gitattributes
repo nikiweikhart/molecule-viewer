@@ -1,0 +1,2 @@
+# Shell-Skripte immer mit LF (laufen auch in Linux-Cloud-Sitzungen)
+*.sh text eol=lf
