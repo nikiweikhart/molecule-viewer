@@ -56,11 +56,13 @@ case "$mode" in
       host="${COMPUTERNAME:-${HOSTNAME:-$(hostname 2>/dev/null || echo cloud)}}"
       git commit -q -m "auto-sync $host $(date '+%Y-%m-%d %H:%M')" >/dev/null 2>&1
     fi
-    # Nur pushen, wenn es etwas zu pushen gibt
-    if has_upstream && [ "$(git rev-list --count '@{u}..HEAD' 2>/dev/null)" = "0" ]; then exit 0; fi
-    if ! git push -q -u origin HEAD >/dev/null 2>&1; then
+    # Nur pushen, wenn es etwas zu pushen gibt (Vergleich mit Upstream bzw. origin/main,
+    # weil Cloud-Checkouts oft keinen Tracking-Branch haben)
+    if has_upstream; then base='@{u}'; else git fetch -q origin 2>/dev/null; base='origin/main'; fi
+    [ "$(git rev-list --count "$base..HEAD" 2>/dev/null)" = "0" ] && exit 0
+    if ! err=$(git push -q -u origin HEAD 2>&1); then
       # Remote ist weiter: erst abgleichen, dann nochmal pushen
-      pull && { git push -q -u origin HEAD >/dev/null 2>&1 || say "Push fehlgeschlagen (offline?) - wird beim naechsten Mal nachgeholt."; }
+      pull && { err=$(git push -q -u origin HEAD 2>&1) || say "Push fehlgeschlagen - wird beim naechsten Mal nachgeholt. ($(printf '%s' "$err" | tail -1 | tr -d '"\\'))"; }
     fi
     ;;
 esac
